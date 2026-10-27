@@ -60,7 +60,86 @@ dsh --profile desktop --dump-config
 | 按标点分条发送 | ✅ 带随机延时，更像真人 |
 | 表情包识别 | ✅ 经典表情出中文名，商城大表情出标题 |
 | **发表情** | ✅ | 经典小表情 275 个（中文名或编号），以及账号收藏夹里的商城大表情 |
+| **表情官方目录搜索** | ✅ | 先查 QQ 官方目录再落内置表，新表情也认得 |
+| **消息历史检索** | ✅ | 群历史 + 好友私聊历史，默认 20 条 |
+| **发 QQ 空间说说** | ✅ | 对外发布，删说说已封禁 |
+| **高风险 action 封禁** | ✅ | 14 个凭据/接管类 action 物理拦截，绕不过去 |
 | 设置页 UI | ✅ 设置 → QQ 桥接 |
+
+---
+
+## 能力接入范围（2026-10-27 定档）
+
+协议端（SnowLuma）有 195 个 action，不是全接 —— 按风险分档，只接明确放行的。
+
+### ✅ 已接入（4 个工具）
+
+| 工具 | 干什么 | 底层 action |
+|---|---|---|
+| `qq_send` | 发消息 + 发表情 | `send_group_msg` / `send_private_msg` / `send_custom_face` |
+| `qq_emoji_search` | 搜 QQ 官方表情目录 | `search_sys_faces` / `fetch_sys_faces` |
+| `qq_msg_history` | 查群 / 好友历史消息 | `get_group_msg_history` / `get_friend_msg_history` |
+| `qq_qzone_post` | 发表 QQ 空间说说 | `send_qzone_msg` |
+
+### ❌ 明确不接
+
+| 项 | 原因 |
+|---|---|
+| 群信息检索 | 用户明确排除 |
+| 撤回消息 | 用户明确排除 |
+| 表情回应 | 用户明确排除 |
+| 发图片 / 群文件上传 | B 档里只点名了「发说说」 |
+| 往收藏夹添加表情 | C 档 |
+
+### 🔒 C 档封禁清单（14 项，物理拦截）
+
+封禁点放在 `callOneBot()` —— **所有**协议端调用的唯一出口。
+不是「在提示词里写别调用」，而是调用即抛错、连 HTTP 都不发。
+
+| action | 为什么封 |
+|---|---|
+| `get_cookies` | 交出账号登录态（Cookie）→ 别人能直接冒用这个号 |
+| `get_credentials` | 交出账号登录凭证 |
+| `get_csrf_token` | 交出账号登录令牌 |
+| `get_clientkey` | 交出客户端密钥 |
+| `get_rkey_server` | 交出登录密钥服务器信息 |
+| `request_decrypt_key` | 交出本地数据库解密密钥 |
+| `bot_exit` | 把机器人踢下线 |
+| `set_online_status` | 改账号在线状态 |
+| `set_diy_online_status` | 改账号在线状态 |
+| `set_input_status` | 改账号输入状态 |
+| `send_like` | 替用户点赞，越权社交动作 |
+| `set_qzone_ban` | 拉黑 / 解除拉黑好友，越权社交动作 |
+| `delete_qzone_msg` | 删已发表的说说（发说说允许，删不允许） |
+| `add_custom_face` | 往收藏夹写入内容（读收藏夹允许） |
+
+清单写在 `lib/blocked.js`，要放开哪一项改那个集合就行 —— 但凭据那六项别动。
+
+### 怎么用这 4 个工具
+
+```json
+// 发消息 + 经典小表情
+{ "text": "搞定了", "emoji": "OK" }
+
+// 发商城大表情（收藏夹里的）
+{ "text": "看这个", "custom_emoji": "猫" }
+
+// 查官方表情目录（不确定表情叫什么时先查）
+{ "query": "比心" }          // → 比心（编号 319）
+{ "all": true }              // → 列出全部目录（按表情包分组）
+
+// 查历史消息
+{ "group_id": "1046436553", "count": 20 }
+{ "user_id": "3655191092", "count": 20 }
+
+// 发说说
+{ "content": "今天天气不错", "visibility": 1 }
+```
+
+可见性取值：`1` 所有人可见 · `4` 仅好友可见 · `16` 仅自己可见 · `64` 指定好友 · `128` 分组可见。
+
+⚠️ 发说说是**对外发布**：发出去所有人都能看到，而删说说的接口已被封禁，
+所以只在明确要求「发说说」时才发。
 
 ## 为什么能成
 
@@ -433,8 +512,13 @@ plugins/dsh-onebot-channel/
 │   ├── state.js            游标持久化（按 QQ 号 / 群各存一份）
 │   ├── onebot.js           OneBot HTTP 调用 + 消息段解析
 │   ├── emoticons.js        表情段渲染 + 出站反查（face 中文名 ↔ 编号）
-│   ├── emoji-mark.js       正文里的 [表情:xxx] 标记解析与分配
+│   ├── emoji-mark.js       正文里的 [表情:xxx] 标记解析与分配（同步版 + 异步版）
+│   ├── face-resolve.js     表情名 → face id 的最终解析（官方目录优先，内置表兜底）
+│   ├── sys-faces.js        QQ 官方系统表情目录搜索（search_sys_faces / fetch_sys_faces）
 │   ├── custom-faces.js     收藏表情（商城大表情）列举与发送
+│   ├── history.js          群 / 好友消息历史检索
+│   ├── qzone.js            QQ 空间发说说
+│   ├── blocked.js          C 档封禁清单（物理拦截，callOneBot 入口）
 │   ├── split.js            按标点分条（纯函数）
 │   ├── images.js           QQ 图片 → 附件库 + 人看的副本
 │   ├── title.js            从落盘会话日志抠标题（zstd 多帧）
@@ -445,7 +529,7 @@ plugins/dsh-onebot-channel/
 │   ├── ws.js               OneBot 正向 WebSocket 客户端（断线指数退避重连）
 │   ├── snowluma.js         自动发现协议端的 WS 接入点
 │   ├── api.js              设置页 API（/api/qq-bridge/*）
-│   ├── tool.js             qq_send 工具注册
+│   ├── tool.js             工具注册（qq_send / qq_emoji_search / qq_msg_history / qq_qzone_post）
 │   ├── sendapi.js          AI 主动发消息的本地 HTTP 接口
 │   └── client.js           浏览器端：设置页「QQ 桥接」
 ├── tests/                  离线自测（assert 断言 / ws 模拟 / 群模拟 / 出站模拟 / state 接口 / 组件真渲染）

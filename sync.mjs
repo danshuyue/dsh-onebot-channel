@@ -15,13 +15,17 @@
  *
  * 用法：node sync.mjs
  */
-import { copyFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { copyFileSync, existsSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SRC = dirname(fileURLToPath(import.meta.url))
-const DEST = join(homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-onebot-channel')
+// ⚠️ 路径修正（2026-10-27）：插件实际装在 ~/.dsh/plugins/dsh-qq-bridge/，
+//    **不是** ~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel ——
+//    后者根本不存在（目录名是 dsh-qq-bridge，包名才是 dsh-onebot-channel）。
+//    之前一直指错，每次跑都报"副本目录不存在"，等于同步从来没生效过。
+const DEST = join(homedir(), '.dsh', 'plugins', 'dsh-qq-bridge')
 
 if (join(SRC).toLowerCase() === join(DEST).toLowerCase()) {
   console.error('当前就在 node_modules 副本里，源码目录是 ~/.dsh/plugins/dsh-onebot-channel')
@@ -44,6 +48,18 @@ for (const name of readdirSync(libDir)) {
     continue
   }
   try {
+    // ⚠️ 必须先删目标再拷 —— 副本里的文件跟源码是**硬链接**（同一 inode）。
+    //   copyFileSync 直接覆盖会顺着硬链接把**源码也改了**，
+    //   于是「同步」变成「源码被副本污染」，git diff 会出现莫名其妙的改动。
+    //   先 unlink 断链接，再拷一份独立的，源码保持不动。
+    if (existsSync(to)) {
+      try {
+        unlinkSync(to)
+      } catch {
+        // 删不掉（DSH 正占用）→ 那就退化成原地覆盖，至少能同步内容
+        console.log(`提示：lib/${name} 删不掉（可能被占用），改为原地覆盖`)
+      }
+    }
     copyFileSync(from, to)
     copied += 1
     console.log(`已同步 lib/${name}`)
