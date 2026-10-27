@@ -36,6 +36,16 @@ dsh --profile desktop --dump-config
 > 装完去 **设置 → QQ 桥接** 填协议端地址和 token，绑 QQ 号 / 群到会话。
 > 配置存在 `~/.dsh/qq-bridge.config.json`，**不在插件目录里**，重装不会丢。
 
+**当前版本**：`0.1.0`（2026-10-27 首发，含表情包识别）
+
+> ⚠️ **首次发布注意**：npm 对新注册账号强制要求「2FA 或带 bypass 2FA 的 granular token」才能发布。
+> 用这类 token 发布时，npm 会**先把真实版本转入 staged publishing 队列**，
+> registry 上暂时只出现一个 `0.0.0-stage` 占位版本、`latest` 指向它，
+> 真实版本要等 npm 后台放行（约 1~2 分钟）才出现在版本列表里。
+> **看到 `0.0.0-stage` 先别慌，等几分钟再查**：
+> `npm view dsh-onebot-channel version` 期望结果是 `0.1.0`。
+> 占位版本会残留在版本列表里，但 `latest` 指向真实版本，不影响安装。
+
 **依赖**：需要先跑一个 OneBot 11 协议端（如 SnowLuma、LLOneBot 等），
 并把本插件的 `onebotHttp` / `token` 指过去。插件不读你的 QQ 密码，只跟协议端说话。
 
@@ -646,6 +656,14 @@ WS 推送延迟接近 0，但它会断；HTTP 轮询慢，但几乎不会彻底�
    **本插件只做文本渲染，不下载表情图片**（自用场景不需要），
    所以 `mface` 即使带 `url` 也不会进图片入库链路。
    渲染逻辑在 `tests/emoticon-sim.mjs`，改字段优先级要同步改那里的断言。
+11. **npm 首发会先给你一个 `0.0.0-stage` 占位版**（2026-10-27）——
+   npm 对新注册账号强制要求「2FA 或带 bypass 2FA 的 granular token」才能发布；
+   用这种 token 走 `npm publish` 时，**CLI 会打印 `+ 包名@版本` 看起来成功了**，
+   但真实版本被放进 staged publishing 队列，registry 上只剩一个占位版本，
+   `dist-tags.latest` 指向 `0.0.0-stage`。
+   **判据**：`npm view <包名> version` 显示 `0.0.0-stage` 就是还没放行，等 1~2 分钟自动放行，
+   实测约 90 秒后 `latest` 就变成了真实版本。**不要因此重复发版** ——
+   同一个 name/version 不能重复发布，重发只会拿到 E403。
 
 ---
 
