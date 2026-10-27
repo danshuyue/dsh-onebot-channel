@@ -9,6 +9,9 @@
 
 让「在 QQ 里发消息」变成一个 DSH 会话里的回合，让会话里的 agent 直接回话。
 
+> 📄 **[docs/QQ对话说明.md](docs/QQ对话说明.md)** —— 装好之后把它发给 agent，
+> 她就知道自己是谁、消息从哪来、哪些工具能干什么。改这份文件不用重装插件。
+
 ```
 QQ 客户端
    ↓  OneBot 11 协议端（如 SnowLuma、LLOneBot）
@@ -533,6 +536,8 @@ plugins/dsh-onebot-channel/
 ├── package.json            插件声明（含 dsh.client 指向 UI）
 ├── cordis.patch.yml        bundle 挂载（id: onebot-channel）
 ├── sync.mjs                本地开发辅助：把源码推进 DSH 的两个副本（源 + 运行副本）
+├── docs/
+│   └── QQ对话说明.md        给 agent 看的说明：身份、消息来源、工具用法、限制
 ├── lib/
 │   ├── index.js            宿主端入口：装配各模块
 │   ├── env.js              数据目录、日志（带轮转）、宿主服务取用

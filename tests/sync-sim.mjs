@@ -174,6 +174,42 @@ console.log('\n包名一致性（这条最关键）：')
   }
 }
 
+console.log('\n说明文档（docs/QQ对话说明.md）：')
+{
+  // 树树每次开启新对话都会把这份文档发给 agent ——
+  // 真正被使用的是**工作区**里那份（路径从 qq-bridge.config.json 的 workspaceCwd 读），
+  // 仓库的 docs/ 只是备份。sync.mjs 末尾会把工作区那份反向拉回仓库，
+  // 免得两边各改各的、最后不一样。
+  const repoDoc = join(SRC, 'docs', 'QQ对话说明.md')
+  ok(existsSync(repoDoc), '仓库里有 docs/QQ对话说明.md')
+
+  const configFile = join(homedir(), '.dsh', 'qq-bridge.config.json')
+  if (existsSync(configFile)) {
+    const config = JSON.parse(readFileSync(configFile, 'utf8'))
+    const wsCwd = String(config.workspaceCwd ?? '').trim()
+    if (wsCwd !== '') {
+      const wsDoc = join(wsCwd, 'QQ对话说明.md')
+      if (existsSync(wsDoc)) {
+        const wsBytes = readFileSync(wsDoc)
+        const repoBytes = readFileSync(repoDoc)
+        ok(
+          wsBytes.equals(repoBytes),
+          '仓库里的 docs/QQ对话说明.md 与工作区那份一致（sync 会自动反向同步）'
+        )
+      }
+    }
+  }
+
+  // 两个副本里也得有这份文档
+  for (const [label, dir] of [['源副本', DIRS.source], ['运行副本', DIRS.runtime]]) {
+    ok(existsSync(join(dir, 'docs', 'QQ对话说明.md')), `${label}里有 docs/QQ对话说明.md`)
+  }
+
+  // package.json 的 files 要包含 docs，否则 npm 发布时不会带上
+  const pkg = JSON.parse(readFileSync(join(SRC, 'package.json'), 'utf8'))
+  ok((pkg.files ?? []).includes('docs'), "package.json 的 files 包含 'docs'")
+}
+
 console.log('\nsync.mjs 本身：')
 {
   const syncPath = join(SRC, 'sync.mjs')

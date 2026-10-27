@@ -19,7 +19,7 @@
  *
  * 用法：node sync.mjs
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -141,6 +141,22 @@ for (const dest of targets) {
   const patchFrom = join(SRC, 'cordis.patch.yml')
   if (existsSync(patchFrom)) syncFile(patchFrom, join(dest, 'cordis.patch.yml'))
 
+  // docs/ 也得跟上 —— 里面是给 agent 看的说明文档
+  const docsDir = join(SRC, 'docs')
+  if (existsSync(docsDir)) {
+    const destDocs = join(dest, 'docs')
+    if (!existsSync(destDocs)) {
+      try {
+        mkdirSync(destDocs, { recursive: true })
+      } catch (error) {
+        console.error(`  建 docs 目录失败：${error.message}`)
+      }
+    }
+    for (const name of readdirSync(docsDir)) {
+      syncFile(join(docsDir, name), join(destDocs, name))
+    }
+  }
+
   // 副本里可能有源码已经没有的旧文件（重构删掉的模块），列出来提醒，不自动删
   for (const name of readdirSync(join(dest, 'lib'))) {
     if (!existsSync(join(libDir, name))) {
@@ -155,3 +171,38 @@ for (const dest of targets) {
 console.log(`\n完成：共新同步 ${totalCopied} 个文件，跳过 ${totalSkipped} 个`)
 console.log('配置和游标不在这里（在 ~/.dsh/qq-bridge.*），不会被动。')
 console.log('要生效：**重启 DSH**（插件是进程启动时加载的，热重载不保证能换掉工具表）。')
+
+// ---------------------------------------------------------------------------
+// 反向同步：工作区里的说明文档 → 仓库的 docs/
+//
+// 树树每次开启新对话都会把「QQ对话说明.md」发给 agent，那份是**工作区**里的
+// （路径从 ~/.dsh/qq-bridge.config.json 的 workspaceCwd 读）。
+// 它才是真正被使用的那一份 —— 仓库里的 docs/ 只是备份。
+// 所以这里把工作区那份拉回仓库，避免两边各改各的、最后不一样。
+// ---------------------------------------------------------------------------
+
+const CONFIG_FILE = join(homedir(), '.dsh', 'qq-bridge.config.json')
+if (existsSync(CONFIG_FILE)) {
+  try {
+    const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+    const wsCwd = String(config.workspaceCwd ?? '').trim()
+    if (wsCwd !== '') {
+      const wsDoc = join(wsCwd, 'QQ对话说明.md')
+      const repoDoc = join(SRC, 'docs', 'QQ对话说明.md')
+      if (existsSync(wsDoc)) {
+        const wsBytes = readFileSync(wsDoc)
+        const repoBytes = existsSync(repoDoc) ? readFileSync(repoDoc) : null
+        if (repoBytes === null || !wsBytes.equals(repoBytes)) {
+          mkdirSync(join(SRC, 'docs'), { recursive: true })
+          writeFileSync(repoDoc, wsBytes)
+          console.log(`\n已把工作区的说明文档拉回仓库：${wsDoc}`)
+          console.log('   → docs/QQ对话说明.md（记得 git add + commit）')
+        } else {
+          console.log('\n说明文档：工作区与仓库一致，无需更新')
+        }
+      }
+    }
+  } catch (error) {
+    console.log(`\n提示：反向同步说明文档失败（不影响插件）：${error instanceof Error ? error.message : error}`)
+  }
+}
