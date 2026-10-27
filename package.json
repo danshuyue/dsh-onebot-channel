@@ -1,0 +1,62 @@
+{
+  "name": "dsh-onebot-channel",
+  "version": "0.1.0",
+  "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，并提供 qq_send 工具回发消息。",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "cordis",
+    "agent",
+    "channel",
+    "qq",
+    "onebot",
+    "onebot11",
+    "snowluma"
+  ],
+  "author": "单树见月 <3472302240@qq.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./client": "./lib/client.js"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "scripts": {
+    "test": "node tests/assert.mjs && node tests/ws-sim.mjs && node tests/client-render.mjs",
+    "sync": "node sync.mjs"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1"
+  },
+  "engines": {
+    "node": ">=22.19"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shutianyu/danshu-dsh-onebot-channel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/shutianyu/danshu-dsh-onebot-channel/issues"
+  },
+  "homepage": "https://github.com/shutianyu/danshu-dsh-onebot-channel#readme"
+}

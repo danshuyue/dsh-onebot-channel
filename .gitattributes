@@ -1,0 +1,18 @@
+# 默认按文本处理，自动归一化行尾
+* text=auto eol=lf
+
+# 明确指定各类文件的处理方式
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.json  text eol=lf
+*.yml    text eol=lf
+*.md     text eol=lf
+LICENSE text eol=lf
+
+# 二进制文件不转换
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.tgz   binary
