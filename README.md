@@ -172,8 +172,8 @@ dsh plugin --profile desktop add dsh-onebot-channel
   // ---- 会话 ----
   "workspaceCwd": "D:\\DSH workspace\\QQ对话",
   "resumeColdSession": true,                   // 会话没开着时冷启动它
-  "fallbackToLiveSession": true,                // 首选会话没 agent 时改投「最近活跃且有 agent」的会话
-                                                 // ⚠️ 这会绕过路由表 —— 建议改成 false
+  "fallbackToLiveSession": false,               // 首选会话没 agent 时改投别的会话
+                                                 // ⚠️ 这会绕过路由表，默认关着
   "agentOptions": { "provider": "deepseek-account", "model": "deepseek-flash" },
 
   // ---- 分条发送 ----

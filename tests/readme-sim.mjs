@@ -62,11 +62,11 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
   }
   eq(DEFAULTS.resumeColdSession, true, 'resumeColdSession 默认')
   eq(DEFAULTS.groupOnlyWhenAt, true, 'groupOnlyWhenAt 默认')
-  // fallbackToLiveSession 的默认值跟「绕过路由表」的风险绑定，README 必须写准
-  eq(DEFAULTS.fallbackToLiveSession, true, 'fallbackToLiveSession 默认')
+  // fallbackToLiveSession 会绕过路由表，默认必须是 false（2026-10-27 从 true 改的）
+  eq(DEFAULTS.fallbackToLiveSession, false, 'fallbackToLiveSession 默认')
   ok(
-    README.includes('"fallbackToLiveSession": true'),
-    'README 的配置示例里 fallbackToLiveSession 写的是 true'
+    README.includes('"fallbackToLiveSession": false'),
+    'README 的配置示例里 fallbackToLiveSession 写的是 false'
   )
 }
 
