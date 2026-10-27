@@ -532,7 +532,7 @@ node repair_session.mjs "<会话目录>/session.v4.jsonl.zstd" --write  # 备份
 plugins/dsh-onebot-channel/
 ├── package.json            插件声明（含 dsh.client 指向 UI）
 ├── cordis.patch.yml        bundle 挂载（id: onebot-channel）
-├── sync.mjs                本地开发辅助：把源码推进 profile 的 node_modules 副本
+├── sync.mjs                本地开发辅助：把源码推进 DSH 的两个副本（源 + 运行副本）
 ├── lib/
 │   ├── index.js            宿主端入口：装配各模块
 │   ├── env.js              数据目录、日志（带轮转）、宿主服务取用
@@ -605,10 +605,24 @@ node tests/*.mjs                # 各个离线模拟脚本
 > ⚠️ 模拟脚本**必须显式设置 `cfg.selfUin`**：群消息的 @ 段要跟 `selfUin` 比对，
 > 继承真实配置的话 @ 永远认不出来，测试会「一条都没投递」。
 
-本地改了源码要推进 DSH 的 profile 副本时，用 `node sync.mjs`：
-pnpm 的 `file:` 目录依赖是**硬链接**，新建的文件不会自动出现在副本里，
-`sync.mjs` 会逐文件比对（目标不存在 → 补拷 / inode 不同 → 覆盖），
-跑完日志里应看到「新同步 N 个文件」。
+本地改了源码要推进 DSH 时，用 `node sync.mjs`。
+
+⚠️ **插件在 DSH 里有两份，`sync.mjs` 两个都要同步**（2026-10-27 修掉的坑）：
+
+| 目录 | 是什么 |
+|---|---|
+| `~/.dsh/plugins/dsh-qq-bridge/` | pnpm `file:` 依赖的**源**。pnpm 重装 / 重建时会从这里取 |
+| `~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/` | **DSH 运行时真正 import 的目录** |
+
+之前只同步前者 → 运行副本一直是旧的 → 现象是「日志写着工具注册成功，
+agent 那边却只有 `qq_send`」。
+
+`sync.mjs` 逐文件比对（目标不存在 → 补拷 / inode 不同 → 覆盖），
+跑完日志里应看到「新同步 N 个文件」（两个目录各一份）。
+跑完 **重启 DSH** 才生效 —— 插件是进程启动时加载的。
+
+跑 `node tests/sync-sim.mjs` 可以直接检查运行副本的模块完整性和工具注册，
+比翻日志快。
 
 ### 想知道 DSH 的 Session API 到底有什么
 
@@ -686,6 +700,7 @@ pnpm 的 `file:` 目录依赖是**硬链接**，新建的文件不会自动出�
 | 收到的表情包看着像 `.jpg`，其实是动图 | QQ 发来的文件名**一律**是 `<MD5>.jpg`，但内容经常是 GIF（实测 43 张里 5 个 GIF、1 个 PNG）。之前原样保留扩展名，「看到的格式」和「实际格式」对不上 | 落盘时按**嗅探出的真实格式**改写扩展名（`withExt`），不看 QQ 给的后缀 |
 | 工具返回了 schema 里没有的字段 → 工具调用直接失败 | `output.schema` 是 `additionalProperties:false`，多一个字段宿主就判 `ToolOutputError` | 返回值字段必须跟 schema 逐字对齐（`qq_collect_face` 的收藏分支曾返回 `recent:[]`，已修） |
 | `delete_custom_face` 明明存在，agent 却说「不能删收藏夹里的表情」 | agent 只看了旧文档 | 已做成受控入口 `qq_collect_face` 的 `delete=` 参数，文档同步改正 |
+| 同步日志显示「工具注册成功」，agent 那边却**只有 qq_send** | 插件在 DSH 里有**两个**副本：`~/.dsh/plugins/dsh-qq-bridge/`（pnpm `file:` 依赖的**源**）和 `~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/`（**DSH 运行时真正 import 的**）。`sync.mjs` 之前只同步前者，两者又不是硬链接 → 运行副本一直是旧的（实测 DSH 18:35 启动时加载的是 12:50 的副本，里面只有 `qq_send`） | `sync.mjs` 改成**两个都同步**；新增 `tests/sync-sim.mjs` 直接检查运行副本的模块完整性和工具注册，防止再漏 |
 
 ### 出问题先查这几行日志
 
