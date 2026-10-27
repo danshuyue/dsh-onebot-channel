@@ -53,10 +53,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YOUR_GITHUB_USERNAME/dsh-onebot-channel.git"
+    "url": "git+https://github.com/danshuyue/dsh-onebot-channel.git"
   },
   "bugs": {
-    "url": "https://github.com/YOUR_GITHUB_USERNAME/dsh-onebot-channel/issues"
+    "url": "https://github.com/danshuyue/dsh-onebot-channel/issues"
   },
-  "homepage": "https://github.com/YOUR_GITHUB_USERNAME/dsh-onebot-channel#readme"
+  "homepage": "https://github.com/danshuyue/dsh-onebot-channel#readme"
 }
