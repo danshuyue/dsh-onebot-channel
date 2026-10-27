@@ -1,18 +1,22 @@
 /**
  * 同步链路自检：node tests/sync-sim.mjs，退出码 0 = 全过，1 = 有失败。
  *
- * 覆盖 2026-10-27 查出的一个「同步了等于没同步」的坑：
+ * 覆盖 2026-10-27 查出的两个坑：
  *
+ * 坑一「同步了等于没同步」：
  *   插件在 DSH 里有**两个**副本：
- *     A) ~/.dsh/plugins/dsh-qq-bridge/                      ← pnpm file: 依赖的**源**
- *     B) ~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/ ← DSH 运行时**真正 import** 的
- *
+ *     A) ~/.dsh/plugins/dsh-onebot-channel/                      ← pnpm file: 依赖的**源**
+ *     B) ~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel/ ← DSH 运行时**真正 import** 的
  *   之前的 sync.mjs 只同步 A。A 和 B 不是硬链接（inode 不同），
  *   所以改了 A，B 一动不动 —— 现象是「日志写着工具注册成功，
  *   但 agent 那边就是没有这个工具」。
- *
  *   实际踩到的时候：DSH 18:35 启动，加载的是 12:50 的 B 副本，
  *   里面只有 qq_send。agent 明确说「本会话里没有 qq_collect_face 这个工具，只剩 qq_send」。
+ *
+ * 坑二「名字对不上，设置页入口消失」：
+ *   DSH 按**安装目录名**去 node_modules 找包，并且校验 package.json 的 name
+ *   等于目录名 —— 对不上就跳过整个包，浏览器侧拿不到 client bundle，
+ *   设置页就没入口了（而服务端 API 和工具全都正常，特别难查）。
  *
  * 这个测试直接检查**运行副本**里有没有全部模块和全部工具注册。
  */
@@ -39,10 +43,13 @@ function eq(actual, expected, name) {
 
 const SRC = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..')
 
+/** 插件在 DSH 里的安装目录名 —— package.json 的 name 必须等于它。 */
+const PKG_DIR_NAME = 'dsh-onebot-channel'
+
 /** 插件在 DSH 里的两个副本。 */
 const DIRS = {
-  source: join(homedir(), '.dsh', 'plugins', 'dsh-qq-bridge'),
-  runtime: join(homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-qq-bridge')
+  source: join(homedir(), '.dsh', 'plugins', PKG_DIR_NAME),
+  runtime: join(homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', PKG_DIR_NAME)
 }
 
 /** 插件对外暴露的工具（注册函数名 → 工具名）。 */
@@ -121,32 +128,50 @@ console.log('\n两个副本的内容一致：')
 
 console.log('\n包名一致性（这条最关键）：')
 {
-  // ⚠️ 2026-10-27 踩过的坑：package.json 的 name 写成 `dsh-onebot-channel`，
-  // 而插件目录叫 `dsh-qq-bridge`。sync 覆盖 package.json 之后，
+  // ⚠️ 2026-10-27 踩过的坑：package.json 的 name 跟插件的**安装目录名**不一致
+  // （一个是 dsh-onebot-channel，一个是 dsh-qq-bridge）。sync 覆盖 package.json 之后，
   // **设置页的「QQ 桥接」入口消失了**。
-  //   DSH 按【目录名】去 node_modules 找包（nearestPackage），
+  //   DSH 按【安装目录名】去 node_modules 找包（nearestPackage），
   //   并校验 package.json 的 name 等于目录名 —— 对不上就跳过整个包。
   //   结果：插件不进 boot graph → 浏览器侧没有 client bundle → 设置页没入口。
   //   （服务端 API 和工具都正常，因为 cordis 是按 patch 文件里的 name 加载的，
   //    所以「功能都在、就是设置页找不到」这个现象特别难查。）
   //
-  // 这条断言就是防止它再犯：name 必须同时等于目录名、patch 里的 name、
+  // 这条断言就是防止它再犯：name 必须同时等于安装目录名、patch 里的 name、
   // 以及 lib/index.js 导出的 name。
   const pkg = JSON.parse(readFileSync(join(SRC, 'package.json'), 'utf8'))
-  const dirName = basename(SRC)
-  eq(pkg.name, dirName, `package.json 的 name 等于插件目录名（${dirName}）`)
+  eq(pkg.name, PKG_DIR_NAME, `package.json 的 name 等于安装目录名（${PKG_DIR_NAME}）`)
 
   const patch = readFileSync(join(SRC, 'cordis.patch.yml'), 'utf8')
   const patchName = /name:\s*(\S+)/.exec(patch)?.[1] ?? ''
-  eq(patchName, dirName, 'cordis.patch.yml 里的 name 等于目录名')
+  eq(patchName, PKG_DIR_NAME, 'cordis.patch.yml 里的 name 等于安装目录名')
 
   const index = readFileSync(join(SRC, 'lib', 'index.js'), 'utf8')
   const exportName = /export const name = '([^']+)'/.exec(index)?.[1] ?? ''
-  eq(exportName, dirName, 'lib/index.js 导出的 name 等于目录名')
+  eq(exportName, PKG_DIR_NAME, 'lib/index.js 导出的 name 等于安装目录名')
 
   const client = readFileSync(join(SRC, 'lib', 'client.js'), 'utf8')
   const moduleId = /id: '([^']+)'/.exec(client)?.[1] ?? ''
-  eq(moduleId, dirName, 'lib/client.js 的模块 id 等于目录名')
+  eq(moduleId, PKG_DIR_NAME, 'lib/client.js 的模块 id 等于安装目录名')
+
+  // profile 的依赖键和 bundles 也得对上 —— DSH 靠它们决定加载哪个包
+  const profilePkg = join(homedir(), '.dsh', 'profiles', 'desktop', 'package.json')
+  if (existsSync(profilePkg)) {
+    const profile = JSON.parse(readFileSync(profilePkg, 'utf8'))
+    eq(
+      profile.dependencies?.[PKG_DIR_NAME] ?? '',
+      `file:../../plugins/${PKG_DIR_NAME}`,
+      'profile 的依赖键指向插件源目录'
+    )
+    ok(
+      (profile.dsh?.profile?.bundles ?? []).includes(PKG_DIR_NAME),
+      'profile 的 bundles 列表里有这个插件'
+    )
+    ok(
+      !('dsh-qq-bridge' in (profile.dependencies ?? {})),
+      'profile 依赖里没有旧包名残留'
+    )
+  }
 }
 
 console.log('\nsync.mjs 本身：')
@@ -155,7 +180,9 @@ console.log('\nsync.mjs 本身：')
   if (existsSync(syncPath)) {
     const sync = readFileSync(syncPath, 'utf8')
     ok(sync.includes("'profiles', 'desktop', 'node_modules'"), 'sync.mjs 里写了运行副本路径')
-    ok(sync.includes("'plugins', 'dsh-qq-bridge'"), 'sync.mjs 里写了源副本路径')
+    ok(sync.includes("'plugins', PKG_DIR_NAME"), 'sync.mjs 里写了源副本路径')
+    ok(sync.includes("const PKG_DIR_NAME = 'dsh-onebot-channel'"), 'sync.mjs 里写了安装目录名常量')
+    ok(sync.includes('PKG_NAME !== PKG_DIR_NAME'), 'sync.mjs 同步前校验包名跟安装目录名一致')
     ok(!/const DEST =/.test(sync), 'sync.mjs 不再只有一个目标（避免又漏同步一个）')
   } else {
     ok(false, 'sync.mjs 存在')

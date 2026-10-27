@@ -611,8 +611,8 @@ node tests/*.mjs                # 各个离线模拟脚本
 
 | 目录 | 是什么 |
 |---|---|
-| `~/.dsh/plugins/dsh-qq-bridge/` | pnpm `file:` 依赖的**源**。pnpm 重装 / 重建时会从这里取 |
-| `~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/` | **DSH 运行时真正 import 的目录** |
+| `~/.dsh/plugins/dsh-onebot-channel/` | pnpm `file:` 依赖的**源**。pnpm 重装 / 重建时会从这里取 |
+| `~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel/` | **DSH 运行时真正 import 的目录** |
 
 之前只同步前者 → 运行副本一直是旧的 → 现象是「日志写着工具注册成功，
 agent 那边却只有 `qq_send`」。
@@ -700,7 +700,22 @@ agent 那边却只有 `qq_send`」。
 | 收到的表情包看着像 `.jpg`，其实是动图 | QQ 发来的文件名**一律**是 `<MD5>.jpg`，但内容经常是 GIF（实测 43 张里 5 个 GIF、1 个 PNG）。之前原样保留扩展名，「看到的格式」和「实际格式」对不上 | 落盘时按**嗅探出的真实格式**改写扩展名（`withExt`），不看 QQ 给的后缀 |
 | 工具返回了 schema 里没有的字段 → 工具调用直接失败 | `output.schema` 是 `additionalProperties:false`，多一个字段宿主就判 `ToolOutputError` | 返回值字段必须跟 schema 逐字对齐（`qq_collect_face` 的收藏分支曾返回 `recent:[]`，已修） |
 | `delete_custom_face` 明明存在，agent 却说「不能删收藏夹里的表情」 | agent 只看了旧文档 | 已做成受控入口 `qq_collect_face` 的 `delete=` 参数，文档同步改正 |
-| 同步日志显示「工具注册成功」，agent 那边却**只有 qq_send** | 插件在 DSH 里有**两个**副本：`~/.dsh/plugins/dsh-qq-bridge/`（pnpm `file:` 依赖的**源**）和 `~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/`（**DSH 运行时真正 import 的**）。`sync.mjs` 之前只同步前者，两者又不是硬链接 → 运行副本一直是旧的（实测 DSH 18:35 启动时加载的是 12:50 的副本，里面只有 `qq_send`） | `sync.mjs` 改成**两个都同步**；新增 `tests/sync-sim.mjs` 直接检查运行副本的模块完整性和工具注册，防止再漏 |
+| 同步日志显示「工具注册成功」，agent 那边却**只有 qq_send** | 插件在 DSH 里有**两个**副本：`~/.dsh/plugins/dsh-onebot-channel/`（pnpm `file:` 依赖的**源**）和 `~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel/`（**DSH 运行时真正 import 的**）。`sync.mjs` 之前只同步前者，两者又不是硬链接 → 运行副本一直是旧的（实测 DSH 18:35 启动时加载的是 12:50 的副本，里面只有 `qq_send`） | `sync.mjs` 改成**两个都同步**；新增 `tests/sync-sim.mjs` 直接检查运行副本的模块完整性和工具注册，防止再漏 |
+| 设置页里**找不到「QQ 桥接」**入口（但 API 和工具都正常） | `package.json` 的 `name` 跟插件的**安装目录名**不一致。DSH 按目录名去 node_modules 找包（`nearestPackage`），并校验 `package.json` 的 name **等于**目录名，对不上就**跳过整个包** → 插件不进 boot graph → 浏览器侧拿不到 client bundle → 设置页没入口。**服务端 API 和 6 个工具全正常**（cordis 是按 patch 文件里的 name 加载的），所以现象是「功能都在、就是设置页找不到」，极难定位 | 三处名字对齐（`package.json` / `cordis.patch.yml` / `lib/index.js` 导出）；`sync.mjs` 同步前校验 name == 安装目录名，不一致直接拒绝同步；`tests/sync-sim.mjs` 加断言守住 |
+
+### 诊断「设置页插件入口消失」的手法（可复用）
+
+```bash
+# 1. 找到 DSH 的 web 端口（Electron，端口不固定）
+Get-NetTCPConnection -State Listen | Where-Object { $pids -contains $_.OwningProcess }
+
+# 2. 拉 boot manifest —— 这条 SSE 直接吐出完整的插件清单
+curl -s http://127.0.0.1:<port>/plugins/events | head -1
+#    → data: {"type":"graph","graph":{"entries":[{"id":"...",...}]}}
+#    一看 entries 里有没有自己的插件 id，就知道是「没进 graph」还是「进了但渲染崩了」
+```
+
+`/plugins/events` 是 DSH 的 SSE 通道，返回的 graph.entries 就是浏览器侧会加载的全部插件 id。
 
 ### 出问题先查这几行日志
 

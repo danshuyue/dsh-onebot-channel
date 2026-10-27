@@ -4,10 +4,10 @@
  * ⚠️ 2026-10-27 修掉一个「同步了等于没同步」的坑：
  *
  *   插件在 DSH 里有**两个**副本，缺一不可：
- *     A) ~/.dsh/plugins/dsh-qq-bridge/          ← 「源」
- *        profile 的 package.json 里写的是 "dsh-qq-bridge": "file:../../plugins/dsh-qq-bridge"，
+ *     A) ~/.dsh/plugins/dsh-onebot-channel/          ← 「源」
+ *        profile 的 package.json 里写的是 "dsh-onebot-channel": "file:../../plugins/dsh-onebot-channel"，
  *        pnpm 装的时候从这里取。**重装 / pnpm 重建时会从这里覆盖**。
- *     B) ~/.dsh/profiles/desktop/node_modules/dsh-qq-bridge/   ← 「运行副本」
+ *     B) ~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel/   ← 「运行副本」
  *        **DSH 运行时真正 import 的就是这个目录**。
  *
  *   之前这个脚本只同步 A。A 和 B 不是硬链接（inode 不同），
@@ -26,12 +26,20 @@ import { fileURLToPath } from 'node:url'
 
 const SRC = dirname(fileURLToPath(import.meta.url))
 
+/**
+ * 插件的**安装目录名**（= package.json 的 name = npm 包名）。
+ *
+ * ⚠️ 必须跟 DSH 侧的安装目录名一致 —— DSH 按目录名去 node_modules 找包，
+ *   并且校验 package.json 的 name 等于目录名。改名的活在这儿做一次就够。
+ */
+const PKG_DIR_NAME = 'dsh-onebot-channel'
+
 /** 要同步到的目录（都存在才同步；不存在就跳过并提示）。 */
 const DESTS = [
   // A) 源目录 —— pnpm file: 依赖的来源，重装时会从这里取
-  join(homedir(), '.dsh', 'plugins', 'dsh-qq-bridge'),
+  join(homedir(), '.dsh', 'plugins', PKG_DIR_NAME),
   // B) 运行副本 —— DSH 进程真正 import 的目录，改完这个才立刻生效
-  join(homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', 'dsh-qq-bridge')
+  join(homedir(), '.dsh', 'profiles', 'desktop', 'node_modules', PKG_DIR_NAME)
 ]
 
 const targets = DESTS.filter((dir) => {
@@ -46,27 +54,30 @@ if (targets.length === 0) {
 }
 
 /**
- * ⚠️ 同步前必须校验：package.json 的 name == 插件目录名。
+ * ⚠️ 同步前必须校验：package.json 的 name == 插件的**安装目录名**。
  *
- * 踩过的坑（2026-10-27）：源码里 package.json 的 name 写成了 `dsh-onebot-channel`，
- * 而插件目录叫 `dsh-qq-bridge`。sync 把 package.json 覆盖到运行副本后，
- * **设置页的「QQ 桥接」入口直接消失了** ——
+ * 踩过的坑（2026-10-27）：源码里 package.json 的 name 跟插件在 DSH 里的**安装目录名**
+ * 不一致（一个是 dsh-onebot-channel，一个是 dsh-qq-bridge）。sync 把 package.json
+ * 覆盖到运行副本后，**设置页的「QQ 桥接」入口直接消失了** ——
  *   DSH 按**目录名**去 node_modules 里找包（nearestPackage），
  *   并且会校验 package.json 的 name **等于**目录名，对不上就跳过整个包。
  *   结果：插件不进 boot graph → 浏览器侧拿不到 client bundle → 设置页没入口。
- *   （服务端 API 和工具都正常，因为那是 cordis 按 patch 文件里的 name 加载的。）
+ *   （服务端 API 和工具都正常，因为那是 cordis 按 patch 文件里的 name 加载的，
+ *    所以现象是「功能都在、就是设置页找不到」，极难定位。）
+ *
+ * 注意：源码目录名（github/dsh-qq-bridge）跟安装目录名可以不同 ——
+ * 校验的是**安装目录名**，那才是 DSH 真正去 node_modules 里找包时用的名字。
  *
  * 这里提前拦住，别等同步完才发现设置页没了。
  */
 const PKG_NAME = JSON.parse(readFileSync(join(SRC, 'package.json'), 'utf8')).name
-const DIR_NAME = basename(SRC)
-if (PKG_NAME !== DIR_NAME) {
-  console.error(`\n❌ package.json 的 name（${PKG_NAME}）跟插件目录名（${DIR_NAME}）不一致，拒绝同步。`)
-  console.error('   DSH 按目录名找包并校验 name 一致，不一致会导致设置页的插件入口消失。')
-  console.error('   把 package.json 的 name 改成 ' + DIR_NAME + ' 再跑。')
+if (PKG_NAME !== PKG_DIR_NAME) {
+  console.error(`\n❌ package.json 的 name（${PKG_NAME}）跟安装目录名（${PKG_DIR_NAME}）不一致，拒绝同步。`)
+  console.error('   DSH 按安装目录名找包并校验 name 一致，不一致会导致设置页的插件入口消失。')
+  console.error(`   把 package.json 的 name 改成 ${PKG_DIR_NAME}（或改 sync.mjs 里的 PKG_DIR_NAME）再跑。`)
   process.exit(1)
 }
-console.log(`包名校验通过：${PKG_NAME}`)
+console.log(`包名校验通过：${PKG_NAME}（安装目录名一致）`)
 
 /** 把一个文件从源码拷到目标（先 unlink 断硬链接，再拷独立的一份）。 */
 function syncFile(from, to) {
