@@ -72,7 +72,7 @@ dsh --profile desktop --dump-config
 
 协议端（SnowLuma）有 195 个 action，不是全接 —— 按风险分档，只接明确放行的。
 
-### ✅ 已接入（5 个工具）
+### ✅ 已接入（6 个工具）
 
 | 工具 | 干什么 | 底层 action |
 |---|---|---|
@@ -80,7 +80,8 @@ dsh --profile desktop --dump-config
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `search_sys_faces` / `fetch_sys_faces` |
 | `qq_msg_history` | 查群 / 好友历史消息 | `get_group_msg_history` / `get_friend_msg_history` |
 | `qq_qzone_post` | 发表 QQ 空间说说 | `send_qzone_msg` |
-| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `add_custom_face` / `modify_custom_face` |
+| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `add_custom_face` / `modify_custom_face` / `delete_custom_face` |
+| `qq_face_preview` | **看**收到的表情包（结果直接带图片） | 无（读本地副本 → 附件库） |
 
 ### ❌ 明确不接
 
@@ -548,6 +549,8 @@ plugins/dsh-onebot-channel/
 │   ├── blocked.js          C 档封禁清单（物理拦截，callOneBot 入口）
 │   ├── split.js            按标点分条（纯函数）
 │   ├── images.js           QQ 图片 → 附件库 + 人看的副本
+│   ├── collect.js          收藏表情包（add_custom_face / delete_custom_face）+「收到的图片」目录
+│   ├── preview.js          表情包预览（把本地图送进模型视野，用于看图起名）
 │   ├── title.js            从落盘会话日志抠标题（zstd 多帧）
 │   ├── sessions.js         会话列表 + 冷启动（AgentRegistry.resume）
 │   ├── deliver.js          路由查询 + 投递（agent.followup）
@@ -556,7 +559,7 @@ plugins/dsh-onebot-channel/
 │   ├── ws.js               OneBot 正向 WebSocket 客户端（断线指数退避重连）
 │   ├── snowluma.js         自动发现协议端的 WS 接入点
 │   ├── api.js              设置页 API（/api/qq-bridge/*）
-│   ├── tool.js             工具注册（qq_send / qq_emoji_search / qq_msg_history / qq_qzone_post）
+│   ├── tool.js             工具注册（qq_send / qq_emoji_search / qq_msg_history / qq_qzone_post / qq_collect_face / qq_face_preview）
 │   ├── sendapi.js          AI 主动发消息的本地 HTTP 接口
 │   └── client.js           浏览器端：设置页「QQ 桥接」
 ├── tests/                  离线自测（assert 断言 / ws 模拟 / 群模拟 / 出站模拟 / state 接口 / 组件真渲染）
@@ -672,6 +675,17 @@ pnpm 的 `file:` 目录依赖是**硬链接**，新建的文件不会自动出�
 | WS 一断就彻底哑了 | 只有 WS 没有兜底 | 双通道：WS 推送 + 轮询降级成 30 秒一次补漏；**WS 启动放在轮询之后**（反过来的话，WS 断的那 2 秒窗口没人接） |
 | 前端 `onField is not defined` | 组件函数定义在 `renderAdvanced` 内部，`renderWs` 是平级函数引用不到 | 提到组件层作用域 |
 | 设置页里 WS 的 token 填进去变 `NaN` | 文本框被统一的 `Number()` 转了一遍 | 文本框不再走数值转换 |
+
+### 表情包这条链路（2026-10-27）
+
+| 现象 | 真因 | 修法 |
+|---|---|---|
+| 发 `[表情:晕]` 整条消息消失（`OIDB error 11000: id 17 sysemojis cfg not found`） | 内置表情表是**社区通用编号**，不是 QQ 官方编号。表里 109 个 id 官方目录查无此、另有 11 个**名字对得上但 id 错位**（晕 内置17→官方34、礼物 69→💝…）。协议端 `makeFaceElem` 无条件先 resolve，查不到就**整条消息失败** | 三层防护：id 有效性校验（`isKnownSysFaceId` 查官方目录）→ 解析失败**跳过表情只发文字** → 发送层兜底重发纯文字 |
+| 表情包收不到 / 收藏夹是空的 | 协议端**没有**「收到图片自动收藏」的逻辑（查过 SnowLuma 源码，`addCustomFace` 只被 `add_custom_face` action 调用，没有自动触发点） | 显式调 `qq_collect_face` 写入收藏夹 |
+| 收藏表情包起不了名 | QQ 发来的图片**文件名全是 MD5 哈希**（`05C1B8CD….jpg`），没有任何可读名字；而 QQ 收藏表情的备注（desc）才是以后按名字找回的唯一线索 | 新增 `qq_face_preview`：把本地副本读出来 → 附件库 → 工具结果里带 **image 块**，模型能真的看到图，才起得了名 |
+| 收到的表情包看着像 `.jpg`，其实是动图 | QQ 发来的文件名**一律**是 `<MD5>.jpg`，但内容经常是 GIF（实测 43 张里 5 个 GIF、1 个 PNG）。之前原样保留扩展名，「看到的格式」和「实际格式」对不上 | 落盘时按**嗅探出的真实格式**改写扩展名（`withExt`），不看 QQ 给的后缀 |
+| 工具返回了 schema 里没有的字段 → 工具调用直接失败 | `output.schema` 是 `additionalProperties:false`，多一个字段宿主就判 `ToolOutputError` | 返回值字段必须跟 schema 逐字对齐（`qq_collect_face` 的收藏分支曾返回 `recent:[]`，已修） |
+| `delete_custom_face` 明明存在，agent 却说「不能删收藏夹里的表情」 | agent 只看了旧文档 | 已做成受控入口 `qq_collect_face` 的 `delete=` 参数，文档同步改正 |
 
 ### 出问题先查这几行日志
 
