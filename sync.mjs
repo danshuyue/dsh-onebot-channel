@@ -19,9 +19,9 @@
  *
  * 用法：node sync.mjs
  */
-import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const SRC = dirname(fileURLToPath(import.meta.url))
@@ -44,6 +44,29 @@ if (targets.length === 0) {
   console.error('一个目标目录都没有，先用 DSH 重新安装这个插件。')
   process.exit(1)
 }
+
+/**
+ * ⚠️ 同步前必须校验：package.json 的 name == 插件目录名。
+ *
+ * 踩过的坑（2026-10-27）：源码里 package.json 的 name 写成了 `dsh-onebot-channel`，
+ * 而插件目录叫 `dsh-qq-bridge`。sync 把 package.json 覆盖到运行副本后，
+ * **设置页的「QQ 桥接」入口直接消失了** ——
+ *   DSH 按**目录名**去 node_modules 里找包（nearestPackage），
+ *   并且会校验 package.json 的 name **等于**目录名，对不上就跳过整个包。
+ *   结果：插件不进 boot graph → 浏览器侧拿不到 client bundle → 设置页没入口。
+ *   （服务端 API 和工具都正常，因为那是 cordis 按 patch 文件里的 name 加载的。）
+ *
+ * 这里提前拦住，别等同步完才发现设置页没了。
+ */
+const PKG_NAME = JSON.parse(readFileSync(join(SRC, 'package.json'), 'utf8')).name
+const DIR_NAME = basename(SRC)
+if (PKG_NAME !== DIR_NAME) {
+  console.error(`\n❌ package.json 的 name（${PKG_NAME}）跟插件目录名（${DIR_NAME}）不一致，拒绝同步。`)
+  console.error('   DSH 按目录名找包并校验 name 一致，不一致会导致设置页的插件入口消失。')
+  console.error('   把 package.json 的 name 改成 ' + DIR_NAME + ' 再跑。')
+  process.exit(1)
+}
+console.log(`包名校验通过：${PKG_NAME}`)
 
 /** 把一个文件从源码拷到目标（先 unlink 断硬链接，再拷独立的一份）。 */
 function syncFile(from, to) {
@@ -101,6 +124,11 @@ for (const dest of targets) {
   // package.json 也得跟上（版本号、依赖）
   const pkgFrom = join(SRC, 'package.json')
   if (existsSync(pkgFrom)) syncFile(pkgFrom, join(dest, 'package.json'))
+
+  // cordis.patch.yml 也得跟上 —— 里面是插件在 profile 里的**注册条目**
+  // （id + name）。name 决定 DSH 按哪个包名去加载它，改错了插件就不加载。
+  const patchFrom = join(SRC, 'cordis.patch.yml')
+  if (existsSync(patchFrom)) syncFile(patchFrom, join(dest, 'cordis.patch.yml'))
 
   // 副本里可能有源码已经没有的旧文件（重构删掉的模块），列出来提醒，不自动删
   for (const name of readdirSync(join(dest, 'lib'))) {

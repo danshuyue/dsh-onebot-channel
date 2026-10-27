@@ -18,7 +18,7 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, basename } from 'node:path'
 import { dirname } from 'node:path'
 
 let passed = 0
@@ -31,6 +31,10 @@ function ok(condition, name) {
     failed += 1
     console.error(`  ✗ ${name}`)
   }
+}
+function eq(actual, expected, name) {
+  const same = JSON.stringify(actual) === JSON.stringify(expected)
+  ok(same, `${name}${same ? '' : `（实际 ${JSON.stringify(actual)}，期望 ${JSON.stringify(expected)}）`}`)
 }
 
 const SRC = join(dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..')
@@ -113,6 +117,36 @@ console.log('\n两个副本的内容一致：')
       ok(differs.length === 0, `运行副本与源码逐个文件大小一致${differs.length > 0 ? `（不一致：${differs.join(', ')}）` : ''}`)
     }
   }
+}
+
+console.log('\n包名一致性（这条最关键）：')
+{
+  // ⚠️ 2026-10-27 踩过的坑：package.json 的 name 写成 `dsh-onebot-channel`，
+  // 而插件目录叫 `dsh-qq-bridge`。sync 覆盖 package.json 之后，
+  // **设置页的「QQ 桥接」入口消失了**。
+  //   DSH 按【目录名】去 node_modules 找包（nearestPackage），
+  //   并校验 package.json 的 name 等于目录名 —— 对不上就跳过整个包。
+  //   结果：插件不进 boot graph → 浏览器侧没有 client bundle → 设置页没入口。
+  //   （服务端 API 和工具都正常，因为 cordis 是按 patch 文件里的 name 加载的，
+  //    所以「功能都在、就是设置页找不到」这个现象特别难查。）
+  //
+  // 这条断言就是防止它再犯：name 必须同时等于目录名、patch 里的 name、
+  // 以及 lib/index.js 导出的 name。
+  const pkg = JSON.parse(readFileSync(join(SRC, 'package.json'), 'utf8'))
+  const dirName = basename(SRC)
+  eq(pkg.name, dirName, `package.json 的 name 等于插件目录名（${dirName}）`)
+
+  const patch = readFileSync(join(SRC, 'cordis.patch.yml'), 'utf8')
+  const patchName = /name:\s*(\S+)/.exec(patch)?.[1] ?? ''
+  eq(patchName, dirName, 'cordis.patch.yml 里的 name 等于目录名')
+
+  const index = readFileSync(join(SRC, 'lib', 'index.js'), 'utf8')
+  const exportName = /export const name = '([^']+)'/.exec(index)?.[1] ?? ''
+  eq(exportName, dirName, 'lib/index.js 导出的 name 等于目录名')
+
+  const client = readFileSync(join(SRC, 'lib', 'client.js'), 'utf8')
+  const moduleId = /id: '([^']+)'/.exec(client)?.[1] ?? ''
+  eq(moduleId, dirName, 'lib/client.js 的模块 id 等于目录名')
 }
 
 console.log('\nsync.mjs 本身：')
