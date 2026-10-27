@@ -38,6 +38,8 @@ cfg.groupOnlyWhenAt = true
 cfg.groupContextCount = 6
 cfg.ownerUin = OWNER
 cfg.peerUin = OWNER
+// selfUin 必须显式设：群消息的 @ 段要跟它比对，继承真实配置的话 @ 永远认不出来
+cfg.selfUin = SELF
 writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
 // 201/202 已经投递过了（lastDeliveredSeq=202），不该再进上下文
 writeFileSync(STATE, JSON.stringify({

@@ -33,6 +33,8 @@ process.on('exit', () => {
 
 const cfg = JSON.parse(configBackup)
 cfg.groupUins = ['123456']
+// selfUin 必须显式设：群消息的 @ 段要跟它比对，继承真实配置的话 @ 永远认不出来
+cfg.selfUin = SELF
 writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
 writeFileSync(STATE, JSON.stringify({
   lastId: 3000000001,

@@ -12,19 +12,32 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 //   DATA   = ~/.dsh（配置 / 状态在这里，不随插件重装丢）
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(homedir(), '.dsh')
+const CONFIG = join(DATA, 'qq-bridge.config.json')
 const STATE = join(DATA, 'qq-bridge-state.json')
+const PEER = 1000000001
+
+const configBackup = readFileSync(CONFIG, 'utf8')
 let stateBackup = null
 try { stateBackup = readFileSync(STATE, 'utf8') } catch { stateBackup = null }
-// 崩了也要还原，不然把真实游标改坏
+// 崩了也要还原，不然把真实配置和游标改坏
 process.on('exit', () => {
+  writeFileSync(CONFIG, configBackup, 'utf8')
   if (stateBackup !== null) writeFileSync(STATE, stateBackup, 'utf8')
   else rmSync(STATE, { force: true })
 })
+
+// peerUin / selfUin 必须显式设：私聊消息要按 peerUin 路由，
+// 继承真实配置的话测试消息认不出归属，回复会发到别处
+const cfg = JSON.parse(configBackup)
+cfg.peerUin = PEER
+cfg.ownerUin = PEER
+cfg.selfUin = 1000000002
+cfg.routes = { private: { [String(PEER)]: { sessionId: 'session-outbound-test' } }, group: {} }
+writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
 writeFileSync(STATE, JSON.stringify({ lastId: 0, lastSeq: 3487, lastTime: 1, groups: {} }, null, 2), 'utf8')
 
 const sent = []
 let events = []
-const PEER = 1000000001
 
 globalThis.fetch = async (_url, options) => {
   const payload = JSON.parse(options.body)
