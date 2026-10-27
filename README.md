@@ -72,7 +72,7 @@ dsh --profile desktop --dump-config
 
 协议端（SnowLuma）有 195 个 action，不是全接 —— 按风险分档，只接明确放行的。
 
-### ✅ 已接入（4 个工具）
+### ✅ 已接入（5 个工具）
 
 | 工具 | 干什么 | 底层 action |
 |---|---|---|
@@ -80,6 +80,7 @@ dsh --profile desktop --dump-config
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `search_sys_faces` / `fetch_sys_faces` |
 | `qq_msg_history` | 查群 / 好友历史消息 | `get_group_msg_history` / `get_friend_msg_history` |
 | `qq_qzone_post` | 发表 QQ 空间说说 | `send_qzone_msg` |
+| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `add_custom_face` / `modify_custom_face` |
 
 ### ❌ 明确不接
 
@@ -89,9 +90,8 @@ dsh --profile desktop --dump-config
 | 撤回消息 | 用户明确排除 |
 | 表情回应 | 用户明确排除 |
 | 发图片 / 群文件上传 | B 档里只点名了「发说说」 |
-| 往收藏夹添加表情 | C 档 |
 
-### 🔒 C 档封禁清单（14 项，物理拦截）
+### 🔒 C 档封禁清单（13 项，物理拦截）
 
 封禁点放在 `callOneBot()` —— **所有**协议端调用的唯一出口。
 不是「在提示词里写别调用」，而是调用即抛错、连 HTTP 都不发。
@@ -111,9 +111,14 @@ dsh --profile desktop --dump-config
 | `send_like` | 替用户点赞，越权社交动作 |
 | `set_qzone_ban` | 拉黑 / 解除拉黑好友，越权社交动作 |
 | `delete_qzone_msg` | 删已发表的说说（发说说允许，删不允许） |
-| `add_custom_face` | 往收藏夹写入内容（读收藏夹允许） |
 
 清单写在 `lib/blocked.js`，要放开哪一项改那个集合就行 —— 但凭据那六项别动。
+
+> `add_custom_face` 原先在封禁清单里，2026-10-27 **放开了**：
+> 用户在教 agent 认表情包，而协议端**没有**「收到图片自动收藏」的逻辑
+> （查过 SnowLuma 源码，`addCustomFace` 只被 `add_custom_face` action 调用），
+> 收藏夹不显式写就是空的，`custom_emoji` 那条路永远走不通。
+> 现在改成走受控工具 `qq_collect_face` —— 只允许收藏插件自己收到过的图。
 
 ### 怎么用这 4 个工具
 

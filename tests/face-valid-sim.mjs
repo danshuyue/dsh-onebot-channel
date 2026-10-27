@@ -151,7 +151,7 @@ console.log('splitEmojiMarksAsync：')
 console.log('内置表性质：')
 {
   eq(faceIdOf('晕'), 17, '内置兜底表仍把「晕」记成 17（这是已知的错位，出站靠官方目录纠正）')
-  ok(BLOCKED_ACTIONS.size === 14, '封禁清单仍是 14 项（本次改动没动它）')
+  ok(BLOCKED_ACTIONS.size === 13, '封禁清单是 13 项（add_custom_face 已于 2026-10-27 放开）')
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)

@@ -60,16 +60,18 @@ globalThis.fetch = async (url, init) => {
 
 console.log('blocked.js：')
 {
-  ok(BLOCKED_ACTIONS.size === 14, `封禁清单是 14 项（实际 ${BLOCKED_ACTIONS.size}）`)
+  ok(BLOCKED_ACTIONS.size === 13, `封禁清单是 13 项（实际 ${BLOCKED_ACTIONS.size}）`)
   const mustHave = [
     'get_cookies', 'get_credentials', 'get_csrf_token', 'get_clientkey',
     'get_rkey_server', 'request_decrypt_key', 'bot_exit', 'set_online_status',
     'set_diy_online_status', 'set_input_status', 'send_like', 'set_qzone_ban',
-    'delete_qzone_msg', 'add_custom_face'
+    'delete_qzone_msg'
   ]
   for (const name of mustHave) {
     ok(BLOCKED_ACTIONS.has(name), `封禁了 ${name}`)
   }
+  // add_custom_face 已于 2026-10-27 放开（收藏表情包需要它，走受控工具 qq_collect_face）
+  ok(!BLOCKED_ACTIONS.has('add_custom_face'), 'add_custom_face 已放开（收藏表情包需要）')
   // 允许的必须没被误伤
   const allowed = [
     'send_group_msg', 'send_private_msg', 'get_group_msg_history',
