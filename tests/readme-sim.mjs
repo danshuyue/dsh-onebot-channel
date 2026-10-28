@@ -146,7 +146,7 @@ console.log('\nREADME 里不该出现的过期信息：')
   // 这些是历史上写错过的数字 / 版本号，改版后残留下来会误导人
   ok(!/\b0\.2\.0\b/.test(README), '没有残留旧版本号 0.2.0')
   ok(!/14 个.*action/.test(README), '没有残留「14 个 action」（实际 13）')
-  ok(README.includes('0.6.1'), '版本号是当前的 0.6.1')
+  ok(README.includes('0.6.2'), '版本号是当前的 0.6.2')
   ok(README.includes('六个工具') || README.includes('6 个工具'), '写明了 6 个工具')
 }
 
@@ -179,6 +179,13 @@ console.log('\n私聊游标（2026-10-28 的丢消息 bug）：')
   ok(README.includes('重复消息'), 'README 提到了「重复消息」这个去重误杀的排查入口')
   ok(README.includes('message_seq'), 'README 解释了私聊 message_seq 不可信这件事')
   ok(README.includes('时间戳'), 'README 写明了私聊改用时间戳判新旧')
+}
+
+console.log('\n连发消息重复转发（2026-10-28）：')
+{
+  ok(README.includes('已转发过'), 'README 提到了「已转发过，跳过重复发送」这个排查入口')
+  ok(README.includes('连着发'), 'README 解释了「连着发消息导致重复转发」这件事')
+  ok(README.includes('user/message'), 'README 写明了按 user/message 定位回合')
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
