@@ -248,6 +248,16 @@ grep "error"      ~/.dsh/qq-bridge-load.log | tail -5   # fetch failed = 协议�
 **收不到消息**：① 协议端在跑吗 ② `selfUin` / `peerUin` 对吗 ③ 这个号在 `routes.private` 里吗
 ④ 会话开着吗（没开靠 `resumeColdSession` 冷启动）
 
+**日志里写着「收到消息事件」但会话里没动静** —— 看下一行是不是「重复消息（已处理），跳过」。
+这是去重误杀：旧版本拿私聊的 `message_seq` 判新旧，但私聊的 seq 是两套编号混着的
+（自己发的 71xx 连续、对方发的 50xxx/20xxx 跳号且不单调），会把新消息当成旧消息丢掉。
+0.6.1 起私聊改用时间戳判新旧（群聊仍用 seq），这个问题不会再有。
+
+```bash
+grep "收到消息事件" ~/.dsh/qq-bridge-load.log | tail -3   # 消息进来了吗
+grep "重复消息"     ~/.dsh/qq-bridge-load.log | tail -3   # 被去重误杀了吗
+```
+
 **群里没反应**：① 监听列表里有这个群吗（日志 `[poll] group loop started, watching [...]`）
 ② `groupOnlyWhenAt` 开着的话必须先 @ ③ 首次启动会 seed，启动前发的消息不会被回复，再 @ 一次
 
@@ -365,4 +375,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-28 · v0.6.0*
+*最后更新：2026-10-28 · v0.6.1*

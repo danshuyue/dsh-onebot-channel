@@ -1,6 +1,6 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
   "keywords": [
     "dsh-plugin",
@@ -43,7 +43,7 @@
     }
   },
   "scripts": {
-    "test": "node tests/assert.mjs && node tests/ws-sim.mjs && node tests/client-render.mjs && node tests/emoticon-sim.mjs && node tests/emoji-send-sim.mjs && node tests/capability-sim.mjs && node tests/face-valid-sim.mjs && node tests/collect-sim.mjs && node tests/health-sim.mjs",
+    "test": "node tests/assert.mjs && node tests/ws-sim.mjs && node tests/client-render.mjs && node tests/emoticon-sim.mjs && node tests/emoji-send-sim.mjs && node tests/capability-sim.mjs && node tests/face-valid-sim.mjs && node tests/collect-sim.mjs && node tests/health-sim.mjs && node tests/priv-cursor-sim.mjs",
     "sync": "node sync.mjs"
   },
   "peerDependencies": {
