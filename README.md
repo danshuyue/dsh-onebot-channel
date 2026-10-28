@@ -46,7 +46,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_msg_history` | 查群 / 好友历史消息 | `group_id` `user_id` `count` `before_message_id` |
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
-| `qq_qzone_post` | 发表 QQ 空间说说 | `content` `visibility` `target_uins` |
+| `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -210,6 +210,28 @@ dsh plugin --profile desktop add dsh-onebot-channel
 > `custom_emoji` 那条路永远走不通。现在改成走受控工具 `qq_collect_face` ——
 > 只允许收藏插件自己收到过的图。
 
+**出站两道闸门（2026-10-28）** —— 都挂在 `callOneBot()` 这个唯一出口上，绕不过去：
+
+| 闸门 | 管什么 | 实现 | 拦住了什么 |
+|---|---|---|---|
+| 目标白名单 | **发给谁** | `lib/allowlist.js` | `qq_send` 的 `user_id`/`group_id` 是 agent 随便填的 → 群里一句 prompt injection 就能让她往任意 QQ 号发消息 |
+| 内容审计 | **发什么** | `lib/sensitive.js` | 回复里顺嘴写出 `C:\Users\...`、`token=xxx` → 本机路径和凭据直接进群 |
+
+白名单从**已有的配置**派生，不新增一份（避免两处漂移）：
+私聊 = `peerUin` ∪ `ownerUin` ∪ `routes.private` 的键；群 = `groupUins` ∪ `routes.group` 的键。
+自动转发的目标全部来自路由表，所以永远不会被误伤。
+
+- 想临时放开：`allowSendToAny: true`（⚠️ 等于把上面那个风险还回去，只在排障时开）。
+- 白名单**全空**时（还没配 `peerUin`）不拦，只记一条警告 ——
+  闸门的语义是「限制已配置的服务范围」，不是「没配好就把插件锁死」。
+- 内容审计**故意不匹配**裸的 32 位十六进制串：表情包文件名就是 MD5，
+  加了这条会把正常表情和消息整条拦掉。详见 `lib/sensitive.js` 的注释。
+
+**发说说确认闸** —— `qq_qzone_post` 必须传 `confirm: true` 才真的发。
+说说是对外发布，而 `delete_qzone_msg` 在封禁清单里（发得出去、删不掉），
+所以这道闸不是防恶意，是逼 agent 在发之前把「这是对外发布」过一遍脑子。
+关掉用 `qzoneRequireConfirm: false`（不推荐）。
+
 ## HTTP 接口
 
 插件自带三个同源接口（设置页用的也是它们）：
@@ -247,6 +269,16 @@ grep "error"      ~/.dsh/qq-bridge-load.log | tail -5   # fetch failed = 协议�
 
 **收不到消息**：① 协议端在跑吗 ② `selfUin` / `peerUin` 对吗 ③ 这个号在 `routes.private` 里吗
 ④ 会话开着吗（没开靠 `resumeColdSession` 冷启动）
+
+**撞到白名单** —— 工具报「出站被白名单拦截：好友 xxx 不在允许范围内」：
+
+```bash
+grep "\[allow\]" ~/.dsh/qq-bridge-load.log | tail -3   # 白名单为空时会有警告
+```
+
+这是**硬闸，不是 bug**：`qq_send` 只能发给「插件正在服务的对象」
+（`routes` 里的好友/群 + `peerUin`/`ownerUin` + `groupUins`）。
+要么把目标加进设置页的会话绑定，要么临时 `allowSendToAny: true`（不推荐）。
 
 **日志里写着「收到消息事件」但会话里没动静** —— 看下一行是不是「重复消息（已处理），跳过」。
 这是去重误杀：旧版本拿私聊的 `message_seq` 判新旧，但私聊的 seq 是两套编号混着的

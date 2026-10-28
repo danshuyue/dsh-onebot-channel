@@ -14,3 +14,7 @@ qq-bridge-load.log
 .idea/
 .DS_Store
 Thumbs.db
+
+# 大改之前的本地备份（形如 lib.bak-20261028-142548/）
+*.bak-*/
+*.bak-*
