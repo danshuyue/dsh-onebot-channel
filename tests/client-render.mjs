@@ -74,18 +74,18 @@ if (typeof renderFn !== 'function') {
 // 造一份「接口已经返回」的状态，直接把组件推过 data === null 那个分支
 const fakeState = {
   ok: true,
-  self: { uin: '1000000002', name: '示例机器人' },
+  self: { uin: '3655191092', name: '洛殿下' },
   config: { workspaceCwd: 'D:\\DSH workspace\\QQ对话', groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true, splitMaxChars: 120, splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true },
-  routes: { private: { '1000000001': { sessionId: 'session-00000000-0000-4000-8000-000000000000' } }, group: {} },
-  sessions: [{ id: 'session-00000000-0000-4000-8000-000000000000', title: 'QQ 聊天账号转交', cwd: 'D:\\DSH workspace\\QQ对话', updatedAt: '2026-10-26T10:02:08.333Z' }],
-  friends: [{ id: '1000000001', name: '示例好友' }],
+  routes: { private: { '3472302240': { sessionId: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7' } }, group: {} },
+  sessions: [{ id: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7', title: 'QQ 聊天账号转交', cwd: 'D:\\DSH workspace\\QQ对话', updatedAt: '2026-10-26T10:02:08.333Z' }],
+  friends: [{ id: '3472302240', name: '求道者见月' }],
   groups: []
 }
 
 const bridgeCtx = {
   sessions: {
     list: {
-      getSnapshot: () => ({ byId: { 'session-00000000-0000-4000-8000-000000000000': { id: 'session-00000000-0000-4000-8000-000000000000', cwd: 'D:\\DSH workspace\\QQ对话', displayTitle: 'QQ 聊天账号转交', updatedAt: '2026-10-26T10:02:08.333Z' } } }),
+      getSnapshot: () => ({ byId: { 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7': { id: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7', cwd: 'D:\\DSH workspace\\QQ对话', displayTitle: 'QQ 聊天账号转交', updatedAt: '2026-10-26T10:02:08.333Z' } } }),
       subscribe: () => () => {}
     }
   }
@@ -119,7 +119,7 @@ function render(node, depth) {
 seeds = [
   fakeState,
   0,
-  { private: { '1000000001': { sessionId: 'session-00000000-0000-4000-8000-000000000000' } }, group: {} },
+  { private: { '3472302240': { sessionId: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7' } }, group: {} },
   { private: '', group: '' },
   '',
   false,

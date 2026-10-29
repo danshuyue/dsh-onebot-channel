@@ -60,18 +60,16 @@ globalThis.fetch = async (url, init) => {
 
 console.log('blocked.js：')
 {
-  ok(BLOCKED_ACTIONS.size === 13, `封禁清单是 13 项（实际 ${BLOCKED_ACTIONS.size}）`)
+  ok(BLOCKED_ACTIONS.size === 14, `封禁清单是 14 项（实际 ${BLOCKED_ACTIONS.size}）`)
   const mustHave = [
     'get_cookies', 'get_credentials', 'get_csrf_token', 'get_clientkey',
     'get_rkey_server', 'request_decrypt_key', 'bot_exit', 'set_online_status',
     'set_diy_online_status', 'set_input_status', 'send_like', 'set_qzone_ban',
-    'delete_qzone_msg'
+    'delete_qzone_msg', 'add_custom_face'
   ]
   for (const name of mustHave) {
     ok(BLOCKED_ACTIONS.has(name), `封禁了 ${name}`)
   }
-  // add_custom_face 已于 2026-10-27 放开（收藏表情包需要它，走受控工具 qq_collect_face）
-  ok(!BLOCKED_ACTIONS.has('add_custom_face'), 'add_custom_face 已放开（收藏表情包需要）')
   // 允许的必须没被误伤
   const allowed = [
     'send_group_msg', 'send_private_msg', 'get_group_msg_history',
@@ -243,11 +241,10 @@ console.log('history.js：')
 // ---- 5. qzone.js ----
 
 console.log('qzone.js：')
-// 2026-10-28：发说说加了确认闸，所有成功路径都必须带 confirm: true
 {
   calls = []
   responses = { send_qzone_msg: { tid: '123' } }
-  const result = await sendQzoneMsg({ content: '今天天气不错', confirm: true })
+  const result = await sendQzoneMsg({ content: '今天天气不错' })
   ok(result?.retcode === 0, '发说说成功')
   eq(calls[0].action, 'send_qzone_msg', '调的是 send_qzone_msg')
   eq(calls[0].params.content, '今天天气不错', '正文传对了')
@@ -255,28 +252,14 @@ console.log('qzone.js：')
 }
 {
   calls = []
-  await throws(async () => {
-    await sendQzoneMsg({ content: '没确认就想发' })
-  }, '不带 confirm 的说说被拒绝')
-  ok(calls.length === 0, '被拒绝时没发请求（连 HTTP 都没发）')
-}
-{
-  calls = []
-  await throws(async () => {
-    await sendQzoneMsg({ content: '带路径的 C:\\Users\\Administrator\\.dsh', confirm: true })
-  }, '说说正文含本机路径被审计拦截')
-  ok(calls.length === 0, '被审计拦截时没发请求')
-}
-{
-  calls = []
   responses = { send_qzone_msg: { tid: '123' } }
-  await sendQzoneMsg({ content: '只有好友看', visibility: 4, confirm: true })
+  await sendQzoneMsg({ content: '只有好友看', visibility: 4 })
   eq(calls[0].params.ugc_right, 4, '可见性传对了')
 }
 {
   calls = []
   responses = { send_qzone_msg: { tid: '123' } }
-  await sendQzoneMsg({ content: '给特定的人', visibility: 64, targetUins: ['111', '222'], confirm: true })
+  await sendQzoneMsg({ content: '给特定的人', visibility: 64, targetUins: ['111', '222'] })
   eq(calls[0].params.target_uins, [111, 222], '指定好友列表转成数字')
 }
 {

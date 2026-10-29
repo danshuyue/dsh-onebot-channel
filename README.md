@@ -37,7 +37,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 6 个工具：
+装好之后 agent 有 9 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
@@ -47,6 +47,9 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
+| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `timeout` |
+| `qq_pass` | 划走：本回合不转发、不回话，把话题晾着 | — |
+| `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -73,6 +76,20 @@ dsh plugin --profile desktop add dsh-onebot-channel
 ```
 
 说说可见性：`1` 所有人 · `4` 仅好友 · `16` 仅自己 · `64` 指定好友 · `128` 分组。
+
+### 你不一定非要回话（沉默权）
+
+QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着、会说完了就走」。0.7.1 给模型补上了这三种**不说话**的出口，让对话有节奏、不粘人：
+
+| 场景 | 怎么做 | 工具 |
+|---|---|---|
+| 对方明显还没说完（「我跟你说」「等下」「还有」） | 等一会儿，看下文再说 | `qq_wait` |
+| 没话说 / 不想接 / 话题翻篇了 | 划走 —— 这一回合什么都不发 | `qq_pass` |
+| 双方都收尾了（嗯 / 好 / 哈哈 / 晚安），再补一句就多余 | 收摊，记下聊到哪儿、下次怎么接 | `qq_close` |
+
+`qq_close` 有硬约束：如果对方还有提问没回答，桥接会拒绝收摊，逼模型先把话接完再走。`qq_close` 写下的「下次怎么接」会在下次开场时自动带回，避免冷启动尬聊。
+
+更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
 
 ## 能力
 
@@ -346,7 +363,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（6 个工具注册） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） |
+| 能力与 UI | `tool.js`（9 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） |
 
@@ -386,7 +403,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 6 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 9 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。

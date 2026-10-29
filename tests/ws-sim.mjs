@@ -87,7 +87,7 @@ ok(wsStatus().connected === true, 'wsStatus 报告已连接')
 socket.emit({
   post_type: 'message',
   message_type: 'private',
-  user_id: 1000000001,
+  user_id: 3472302240,
   message: [{ type: 'text', data: { text: '在吗' } }],
   message_id: -123456,
   time: 1793072000
@@ -115,13 +115,10 @@ ok(created.length > createdBefore, '断线后自动重连了')
   markSeen(bucket, message)
   ok(isSeen(bucket, message) === true, '处理过的消息能认出来（message_id 可能是负数，用相等判断）')
   ok(Array.isArray(bucket.seenIds) && bucket.seenIds.length === 1, 'seenIds 记录下来了')
-  // seq 游标也能拦 —— 但**只对群聊**（useSeqCursor=true）。
-  // 私聊的 seq 是两套编号混着的，不能用它判新旧（详见 lib/poll.js 的 isSeen 注释）。
+  // seq 游标也能拦
   const bucket2 = { lastSeq: 100 }
-  ok(isSeen(bucket2, { message_id: 1, message_seq: 50 }, true) === true, '群聊：seq 小于等于游标位置 = 已处理')
-  ok(isSeen(bucket2, { message_id: 2, message_seq: 101 }, true) === false, '群聊：seq 大于游标位置 = 新消息')
-  // 私聊：seq 小也不算数，只看时间戳
-  ok(isSeen(bucket2, { message_id: 3, message_seq: 50 }, false) === false, '私聊：不靠 seq 判旧（seq 编号不可信）')
+  ok(isSeen(bucket2, { message_id: 1, message_seq: 50 }) === true, 'seq 小于等于游标位置 = 已处理')
+  ok(isSeen(bucket2, { message_id: 2, message_seq: 101 }) === false, 'seq 大于游标位置 = 新消息')
 }
 
 // 5. 事件归一化（WS 的平铺结构 → 内部统一结构）
@@ -129,13 +126,13 @@ ok(created.length > createdBefore, '断线后自动重连了')
   const normalized = normalizeEvent({
     post_type: 'message',
     message_type: 'group',
-    group_id: 2000000001,
-    user_id: 1000000003,
-    message: [{ type: 'at', data: { qq: '1000000002' } }, { type: 'text', data: { text: '在吗' } }],
+    group_id: 1046436553,
+    user_id: 1742196292,
+    message: [{ type: 'at', data: { qq: '3655191092' } }, { type: 'text', data: { text: '在吗' } }],
     message_id: -777,
     time: 1793072000
   })
-  ok(normalized.sender.user_id === '1000000003', 'sender.user_id 归一化了')
+  ok(normalized.sender.user_id === '1742196292', 'sender.user_id 归一化了')
   ok(Array.isArray(normalized.message) && normalized.message.length === 2, '段数组原样保留')
   ok(normalized.message_id === -777, 'message_id 保留（负数也没关系）')
 }

@@ -15,7 +15,8 @@ const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(homedir(), '.dsh')
 const CONFIG = join(DATA, 'qq-bridge.config.json')
 const STATE = join(DATA, 'qq-bridge-state.json')
-const PEER = 1000000001
+const PEER = 3472302240
+const SELF = 3655191092
 
 const configBackup = readFileSync(CONFIG, 'utf8')
 let stateBackup = null
@@ -31,7 +32,7 @@ process.on('exit', () => {
 const cfg = JSON.parse(configBackup)
 cfg.peerUin = PEER
 cfg.ownerUin = PEER
-cfg.selfUin = 1000000002
+cfg.selfUin = SELF
 cfg.routes = { private: { [String(PEER)]: { sessionId: 'session-outbound-tool-test' } }, group: {} }
 writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
 writeFileSync(STATE, JSON.stringify({ lastId: 0, lastSeq: 3487, lastTime: 1, groups: {} }, null, 2), 'utf8')
@@ -53,7 +54,7 @@ globalThis.fetch = async (_url, options) => {
         data: {
           messages: [{
             message_id: -5, message_seq: 3488, time: 1792993000,
-            sender: { user_id: PEER, nickname: '示例好友' },
+            sender: { user_id: PEER, nickname: '求道者见月' },
             message: [{ type: 'text', data: { text: '在吗' } }]
           }]
         }
@@ -79,7 +80,7 @@ const fakeAgent = {
         },
         {
           type: 'assistant/message', seq: 13,
-          data: { message: { role: 'assistant', content: [{ type: 'text', text: '这句是给用户看的，不该发到群里' }] } }
+          data: { message: { role: 'assistant', content: [{ type: 'text', text: '这句是给树树看的，不该发到群里' }] } }
         },
         { type: 'turn/end', seq: 14, data: { reason: { kind: 'completed' } } }
       ]

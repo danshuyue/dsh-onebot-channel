@@ -14,7 +14,8 @@ const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(homedir(), '.dsh')
 const CONFIG = join(DATA, 'qq-bridge.config.json')
 const STATE = join(DATA, 'qq-bridge-state.json')
-const PEER = 1000000001
+const PEER = 3472302240
+const SELF = 3655191092
 
 const configBackup = readFileSync(CONFIG, 'utf8')
 let stateBackup = null
@@ -31,7 +32,7 @@ process.on('exit', () => {
 const cfg = JSON.parse(configBackup)
 cfg.peerUin = PEER
 cfg.ownerUin = PEER
-cfg.selfUin = 1000000002
+cfg.selfUin = SELF
 cfg.routes = { private: { [String(PEER)]: { sessionId: 'session-outbound-test' } }, group: {} }
 writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
 writeFileSync(STATE, JSON.stringify({ lastId: 0, lastSeq: 3487, lastTime: 1, groups: {} }, null, 2), 'utf8')
@@ -50,7 +51,7 @@ globalThis.fetch = async (_url, options) => {
       ok: true,
       json: async () => ({
         retcode: 0,
-        data: { messages: [{ message_id: -5, message_seq: 3488, time: 1792993000, sender: { user_id: PEER, nickname: '示例好友' }, message: [{ type: 'text', data: { text: '在吗' } }] }] }
+        data: { messages: [{ message_id: -5, message_seq: 3488, time: 1792993000, sender: { user_id: PEER, nickname: '求道者见月' }, message: [{ type: 'text', data: { text: '在吗' } }] }] }
       })
     }
   }

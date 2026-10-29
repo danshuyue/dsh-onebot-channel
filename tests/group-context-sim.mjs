@@ -26,9 +26,9 @@ process.on('exit', () => {
   if (stateBackup !== null) writeFileSync(STATE, stateBackup, 'utf8')
 })
 
-const SELF = 1000000002
-const OWNER = 1000000001
-const STRANGER = 1000000003
+const SELF = 3655191092
+const OWNER = 3472302240
+const STRANGER = 1742196292
 const GROUP = 123456
 
 const cfg = JSON.parse(configBackup)
@@ -49,16 +49,16 @@ writeFileSync(STATE, JSON.stringify({
 
 const at = (text) => [{ type: 'at', data: { qq: String(SELF) } }, { type: 'text', data: { text: ' ' + text } }]
 const history = [
-  { message_id: -1, message_seq: 201, time: 1793021600, sender: { user_id: STRANGER, nickname: '示例群友' }, message: [{ type: 'text', data: { text: '这是你小号？（已读）' } }] },
-  { message_id: -2, message_seq: 202, time: 1793021610, sender: { user_id: OWNER, nickname: '示例好友' }, message: [{ type: 'text', data: { text: '机器人在吗（已读）' } }] },
-  { message_id: -3, message_seq: 203, time: 1793021620, sender: { user_id: STRANGER, nickname: '示例群友' }, message: at('第一问') },
-  { message_id: -4, message_seq: 204, time: 1793021630, sender: { user_id: OWNER, nickname: '示例好友' }, message: at('第二问') }
+  { message_id: -1, message_seq: 201, time: 1793021600, sender: { user_id: STRANGER, nickname: '千里千寻' }, message: [{ type: 'text', data: { text: '这是你小号？（已读）' } }] },
+  { message_id: -2, message_seq: 202, time: 1793021610, sender: { user_id: OWNER, nickname: '求道者见月' }, message: [{ type: 'text', data: { text: '糖糖在吗（已读）' } }] },
+  { message_id: -3, message_seq: 203, time: 1793021620, sender: { user_id: STRANGER, nickname: '千里千寻' }, message: at('第一问') },
+  { message_id: -4, message_seq: 204, time: 1793021630, sender: { user_id: OWNER, nickname: '求道者见月' }, message: at('第二问') }
 ]
 
 globalThis.fetch = async (_url, options) => {
   const payload = JSON.parse(options.body)
   let data = []
-  if (payload.action === 'get_group_list') data = [{ group_id: GROUP, group_name: '示例群' }]
+  if (payload.action === 'get_group_list') data = [{ group_id: GROUP, group_name: '蹭饭群' }]
   else if (payload.action === 'get_group_msg_history') data = { messages: history }
   else if (payload.action === 'get_friend_msg_history') data = { messages: [] }
   else if (payload.action === 'send_private_msg' || payload.action === 'send_group_msg') data = { message_id: 1 }
@@ -91,13 +91,13 @@ const second = texts.find((text) => text.includes('第二问')) ?? ''
 
 // 第 1 轮：201/202 都已投递过，不该出现在上下文里
 if (first.includes('这是你小号？')) failures.push('第 1 轮把已读消息（seq 201）带进上下文了')
-if (first.includes('机器人在吗')) failures.push('第 1 轮把已读消息（seq 202）带进上下文了')
+if (first.includes('糖糖在吗')) failures.push('第 1 轮把已读消息（seq 202）带进上下文了')
 if (first.includes('[这段时间的群聊]')) failures.push('第 1 轮不该有上下文块（当时没有未读消息）')
 
 // 第 2 轮：只应带上一次投递之后的新消息（seq 203），且不该再夹 201/202
 if (!second.includes('[这段时间的群聊]')) failures.push('第 2 轮应该有上下文块（seq 203 是未读）')
 if (!second.includes('第一问')) failures.push('第 2 轮上下文缺了 seq 203')
-if (second.includes('这是你小号？') || second.includes('机器人在吗')) failures.push('第 2 轮把已读消息夹进来了')
+if (second.includes('这是你小号？') || second.includes('糖糖在吗')) failures.push('第 2 轮把已读消息夹进来了')
 
 console.log('')
 if (failures.length > 0) {

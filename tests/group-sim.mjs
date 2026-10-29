@@ -18,7 +18,7 @@ const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(homedir(), '.dsh')
 const CONFIG = join(DATA, 'qq-bridge.config.json')
 const STATE = join(DATA, 'qq-bridge-state.json')
-const SELF = 1000000002
+const SELF = 3655191092
 
 const configBackup = readFileSync(CONFIG, 'utf8')
 let stateBackup = null
@@ -48,7 +48,7 @@ const fakeHistory = {
     { message_id: -1, message_seq: 101, time: 1792991900, sender: { user_id: 999, nickname: '小明' },
       message: [{ type: 'text', data: { text: '大家好' } }] },
     { message_id: -2, message_seq: 102, time: 1792991910, sender: { user_id: 999, nickname: '小明' },
-      message: [{ type: 'at', data: { qq: String(SELF) } }, { type: 'text', data: { text: ' 在吗机器人' } }] },
+      message: [{ type: 'at', data: { qq: String(SELF) } }, { type: 'text', data: { text: ' 在吗糖糖' } }] },
     { message_id: -3, message_seq: 103, time: 1792991920, sender: { user_id: 999, nickname: '小明' },
       message: [{ type: 'at', data: { qq: 'all' } }, { type: 'text', data: { text: ' 全体注意' } }] }
   ]
