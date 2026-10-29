@@ -10,7 +10,7 @@
 import { writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { remember, touchPeer, describeMemory, loadMemory, useMemoryFile } from '../lib/memory.js'
+import { remember, touchPeer, describeMemory, loadMemory, useMemoryFile, flushPersist } from '../lib/memory.js'
 
 const TMP = join(tmpdir(), `qq-memory-test-${process.pid}.json`)
 useMemoryFile(TMP)
@@ -75,7 +75,8 @@ eq(card4.nick, '小明', 'touchPeer 记下昵称')
 remember('group:9', { fact: '喜欢聊技术' })
 ok(describeMemory('group:9').includes('关于这个群'), '群的卡用「关于这个群」')
 
-// 9. 真的落盘了
+// 9. 真的落盘了（写节流：需要先 flush）
+flushPersist()
 ok(existsSync(TMP), '关系卡真的写到磁盘')
 
 // 10. 文件读坏不崩（不清空、不抛错）

@@ -1,6 +1,6 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.10.1",
+  "version": "0.5.0",
   "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
   "keywords": [
     "dsh-plugin",
