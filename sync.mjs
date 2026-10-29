@@ -77,6 +77,26 @@ for (const DEST of DESTS) {
     }
   }
 
+  // 根目录这几个文件以前漏了同步：副本的 package.json 一直停在旧版本号，
+  // 「源码 0.8.1 / 副本 0.7.0」这种错位查起来很费劲（0.9.0 补上）。
+  for (const name of ['package.json', 'cordis.patch.yml']) {
+    const from = join(SRC, name)
+    const to = join(DEST, name)
+    if (!existsSync(from)) continue
+    if (existsSync(to) && statSync(to).ino === statSync(from).ino) {
+      skipped += 1
+      continue
+    }
+    try {
+      copyFileSync(from, to)
+      copied += 1
+      console.log(`  已同步 ${name}`)
+    } catch (error) {
+      console.error(`  同步 ${name} 失败：${error.message}`)
+      process.exit(1)
+    }
+  }
+
   // 副本里可能有源码已经没有的旧文件（重构删掉的模块），列出来提醒，不自动删
   for (const name of readdirSync(join(DEST, 'lib'))) {
     if (!existsSync(join(libDir, name))) {

@@ -75,11 +75,29 @@ if (typeof renderFn !== 'function') {
 const fakeState = {
   ok: true,
   self: { uin: '3655191092', name: '洛殿下' },
-  config: { workspaceCwd: 'D:\\DSH workspace\\QQ对话', groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true, splitMaxChars: 120, splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true },
+  config: {
+    workspaceCwd: 'D:\\DSH workspace\\QQ对话', groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true,
+    splitMaxChars: 120, splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000,
+    resumeColdSession: true,
+    // 0.9.x：概览页会读这些已保存值（读编辑态会把「没保存」显示成「已生效」）
+    mergeWindowMs: 2500, replyQuietMs: 5000, closureEnabled: true, memoryEnabled: true,
+    proactiveEnabled: true, proactiveIdleHours: 6, proactiveDailyMax: 1,
+    proactiveQuietFrom: '23:00', proactiveQuietTo: '08:00',
+    // 非空 = 「只对选中的人」；概览里应该显示成「指定的 1 人」
+    proactiveTargets: ['private:3472302240']
+  },
+  ws: { connected: true },
   routes: { private: { '3472302240': { sessionId: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7' } }, group: {} },
   sessions: [{ id: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7', title: 'QQ 聊天账号转交', cwd: 'D:\\DSH workspace\\QQ对话', updatedAt: '2026-10-26T10:02:08.333Z' }],
   friends: [{ id: '3472302240', name: '求道者见月' }],
-  groups: []
+  groups: [],
+  // 0.9.0：主动搭话与合并窗口 —— 有记录的分支也要真的渲染一遍（空态好走，非空才容易崩）
+  proactive: {
+    count: 1,
+    targets: ['private:3472302240'],
+    peers: [{ key: 'private:3472302240', uin: '3472302240', available: true, enabled: true, lastProactiveAt: Date.parse('2026-10-29T02:00:00Z'), lastIncomingAt: Date.parse('2026-10-28T20:00:00Z'), countToday: 1, unanswered: 0, reason: 'daily-quota', eligibleAt: 0 }]
+  },
+  merge: { settings: { windowMs: 2500, maxWaitMs: 15000, maxMessages: 10 }, pools: [{ uin: '3472302240', count: 2, waitedMs: 800 }] }
 }
 
 const bridgeCtx = {
@@ -90,6 +108,7 @@ const bridgeCtx = {
     }
   }
 }
+
 
 function isClass(type) {
   return typeof type === 'function' && type.prototype !== undefined && type.prototype.isReactComponent !== undefined
@@ -116,6 +135,7 @@ function render(node, depth) {
 
 // 顺序必须跟组件里 useState 的调用顺序一致：
 // s1 data → sTick → s2 draft → s3 input → s4 msg → s5 busy → s6 loading → s7 tunables
+// → s8 tab（0.9.1 功能分区）→ s9 targetMode（主动搭话选人模式）
 seeds = [
   fakeState,
   0,
@@ -126,8 +146,14 @@ seeds = [
   false,
   {
     groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true, splitMaxChars: 120,
-    splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true
-  }
+    splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true,
+    mergeWindowMs: 2500, mergeMaxWaitMs: 15000, mergeMaxMessages: 10,
+    proactiveEnabled: true, proactiveIdleHours: 6, proactiveDailyMax: 1,
+    proactiveQuietFrom: '23:00', proactiveQuietTo: '08:00', proactiveBackoffMax: 4,
+    proactiveTargets: []
+  },
+  'overview',
+  'all'
 ]
 
 // 错误边界会吞掉异常，只留一句「页面渲染出错」。先把它剥掉，直接调内层组件拿真错误。
@@ -155,39 +181,79 @@ if (section === null) {
   process.exit(1)
 }
 
-cursor = 0
-try {
-  const out = section.type(section.props)
+let pass = 0
+let fail = 0
+function ok(cond, label) {
+  if (cond) { pass += 1; process.stdout.write(`✓ ${label}\n`) } else { fail += 1; process.stdout.write(`✗ ${label}\n`) }
+}
+
+/** 指定 tab 渲染一遍（0.9.1 起一次只挂一块，得挨个走）。 */
+function paint(tabId, mode, ctxLike) {
+  seeds[8] = tabId
+  seeds[9] = mode || 'all'
+  textOut = []
+  cursor = 0
+  const props = Object.assign({}, section.props)
+  if (ctxLike !== undefined) props.bridgeCtx = ctxLike
+  const out = section.type(props)
   render(out, 0)
-} catch (error) {
-  console.error('组件体抛错：', error && error.stack ? error.stack.split('\n').slice(0, 6).join('\n') : error)
-  process.exit(1)
+  return textOut.join('')
 }
 
-const joined = textOut.join('')
-console.log('渲染通过，文本片段：')
-console.log('  ' + joined.slice(0, 300).replace(/\s+/g, ' '))
-for (const expect of ['QQ 桥接', '个可选会话', 'QQ 聊天账号转交', '未绑定']) {
-  console.log((joined.includes(expect) ? '✓ ' : '✗ ') + expect)
+// ---- 1. 顶部导航：功能都列在上面，点了才进 ----
+const overview = paint('overview')
+for (const label of ['概览', '绑定', '对话节奏', '主动搭话', '关系记忆', '推送', '高级']) {
+  ok(overview.includes(label), `顶部列出「${label}」`)
 }
+ok(overview.includes('现在在跑什么'), '概览页有状态摘要')
+ok(overview.includes('待合并') && overview.includes('今天主动'), '概览页有统计块（待合并 / 今天主动）')
+ok(overview.includes('已连'), '概览页反映推送已连')
+ok(overview.includes('指定的 1 人'), '概览页写明主动搭话只对指定的人生效')
 
-// 第二关：模拟 cordis 的门禁 —— 读 ctx.sessions 直接抛
+// ---- 2. 绑定页：会话下拉、没绑定提示、前缀输入框 ----
+const binding = paint('binding')
+ok(binding.includes('个可选会话'), '绑定页显示可选会话数')
+ok(binding.includes('QQ 聊天账号转交'), '绑定页能选到工作区里的会话')
+ok(binding.includes('未绑定'), '绑定页有「未绑定（忽略）」这一项')
+
+// ---- 3. 对话节奏：合并窗口三个字段都在 ----
+const stance = paint('stance')
+ok(stance.includes('合并窗口') && stance.includes('回复前静默'), '对话节奏页有合并窗口与静默')
+ok(stance.includes('判断收尾') || stance.includes('允许判断收尾'), '对话节奏页有收尾开关')
+
+// ---- 4. 主动搭话：能选人（0.9.1 新） ----
+const proactive = paint('proactive')
+ok(proactive.includes('对谁开口'), '主动搭话页有「对谁开口」')
+ok(proactive.includes('所有已绑私聊') && proactive.includes('只对勾选的人'), '两种模式都能选')
+ok(proactive.includes('3472302240'), '名单里列出了已绑会话的人')
+ok(proactive.includes('对TA试一次'), '每个人都能单独试一次')
+ok(proactive.includes('静默开始'), '闸门参数还在')
+
+// 名单行里勾选状态：全员模式 → 全勾
+const allModeTree = section.type(Object.assign({}, section.props))
+ok(allModeTree !== null, '全员模式渲染不炸')
+
+// ---- 5. 记忆 / 推送 / 高级：三块都能单独打开 ----
+ok(paint('memory').includes('关系记忆'), '记忆页能打开')
+ok(paint('ws').includes('WebSocket') || paint('ws').includes('推送地址'), '推送页能打开')
+ok(paint('advanced').includes('高级设置'), '高级页能打开')
+
+// ---- 6. 模拟 cordis 的门禁：读 ctx.sessions 直接抛 ----
 // "cannot get property sessions without inject"。组件必须照样渲染（降级成宿主端那份列表）。
 const hostileCtx = {
   get sessions() {
     throw new Error('cannot get property sessions without inject')
   }
 }
-
-textOut = []
-cursor = 0
+let survived = true
 try {
-  const out2 = section.type(Object.assign({}, section.props, { bridgeCtx: hostileCtx }))
-  render(out2, 0)
+  const joined2 = paint('binding', 'all', hostileCtx)
+  survived = joined2.includes('个可选会话') && joined2.includes('QQ 聊天账号转交')
 } catch (error) {
   console.error('读取 ctx.sessions 抛错时组件挂了：', error && error.message ? error.message : error)
-  process.exit(1)
+  survived = false
 }
-const joined2 = textOut.join('')
-const survived = joined2.includes('个可选会话') && joined2.includes('QQ 聊天账号转交')
-console.log('\nctx.sessions 抛错时：' + (survived ? '✓ 正常降级，面板还在' : '✗ 面板被搞死了'))
+ok(survived, 'ctx.sessions 抛错时正常降级，面板还在')
+
+console.log(`\n${pass} 过 ${fail} 败`)
+process.exit(fail === 0 ? 0 : 1)

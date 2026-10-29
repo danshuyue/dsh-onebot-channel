@@ -116,9 +116,11 @@ ok(created.length > createdBefore, '断线后自动重连了')
   ok(isSeen(bucket, message) === true, '处理过的消息能认出来（message_id 可能是负数，用相等判断）')
   ok(Array.isArray(bucket.seenIds) && bucket.seenIds.length === 1, 'seenIds 记录下来了')
   // seq 游标也能拦
+  // 第三个参数 true = 群聊路径（seq 单调，可以比大小）；
+  // 私聊走时间戳分支，seq 不可信 —— 见 lib/poll.js 的 isSeen 注释
   const bucket2 = { lastSeq: 100 }
-  ok(isSeen(bucket2, { message_id: 1, message_seq: 50 }) === true, 'seq 小于等于游标位置 = 已处理')
-  ok(isSeen(bucket2, { message_id: 2, message_seq: 101 }) === false, 'seq 大于游标位置 = 新消息')
+  ok(isSeen(bucket2, { message_id: 1, message_seq: 50 }, true) === true, 'seq 小于等于游标位置 = 已处理')
+  ok(isSeen(bucket2, { message_id: 2, message_seq: 101 }, true) === false, 'seq 大于游标位置 = 新消息')
 }
 
 // 5. 事件归一化（WS 的平铺结构 → 内部统一结构）

@@ -37,11 +37,11 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 9 个工具：
+装好之后 agent 有 10 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
-| `qq_send` | 发消息、发表情 | `text` `emoji` `custom_emoji` `user_id` `group_id` |
+| `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments` | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` |
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
 | `qq_msg_history` | 查群 / 好友历史消息 | `group_id` `user_id` `count` `before_message_id` |
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
@@ -50,6 +50,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `timeout` |
 | `qq_pass` | 划走：本回合不转发、不回话，把话题晾着 | — |
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` |
+| `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -91,6 +92,78 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 
 更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
 
+### 分几条，也由她定
+
+不传 `segments` 时按句末标点自动切（老行为）；传了就按她给的分段原样发 —— 真人会自己决定「这句分三条还是一条说完」，而不是被标点机械切开。
+
+```jsonc
+// 一句话拆成三条，逐条发出、中间带停顿
+{ "segments": ["我跟你说", "那个事搞定了", "不过还差一点"] }
+```
+
+传 `segments` 时 `text` 被忽略；空字符串段自动丢掉；段内的 `[表情:呲牙]` 挂在该段末尾。
+
+### 她记得你是谁（关系持久化）
+
+称呼和「关于他的几条事实」落在 `~/.dsh/qq-bridge-memory.json`，**重启不丢**：入站自动记昵称和活跃度，模型也能用 `qq_remember` 主动记（「他喜欢猫」「别叫他全名」）。下次被叫醒时，这些会以一小段 `（关于他：称呼：…；记得：…）` 带进正文，所以她不会每次都从零认识你。
+
+一张卡最多 8 条事实、注入正文约 180 字上限 —— 它是**每回合常驻**的，不控长度就是烧 token。不想要这段就设 `memoryEnabled: false`。
+
+### 先记账，再决定什么时候回（标记已读的中间态）
+
+原来 WS 通路是「来一条投一条」：对方连发三句，就开三个回合、被连问三遍。
+`replyQuietMs` 治不了这个 —— 它只是把**每一个回合**各推迟一遍，三条消息仍然是三个回合。
+
+现在私聊多了一层合并窗口（`mergeWindowMs`，默认 2500，设 `0` 关闭）：
+
+```
+来信 → 立刻记账（markSeen + 游标推进，等于「已读」）→ 入池攒着
+     → 窗口到点（或攒够 mergeMaxMessages / 到达 mergeMaxWaitMs）→ 一批放行 → 一个回合
+```
+
+- 「已读」指的是**内部记账**，不是推给 QQ 的回执（OneBot 没有已读回执接口）。
+  它的作用是不让轮询把同一条再拎一遍，同时保证「攒着没回」这件事在状态里是明确的。
+- 投递失败会把记账撤回去（`mergeSnapshots`），轮询或下一批还能重试 —— 不是静默丢消息。
+  唯一的代价：进程在窗口内被强杀（不是正常卸载）时，那一两条「已读」记账已经落盘，会丢掉。
+  窗口只有 2.5 秒，正常卸载会记日志并保留痕迹。
+- 只作用于私聊。群里是 @ 才投递，一条 @ 就是一件事，攒起来反而怪。
+- 跟 `replyQuietMs` 会叠加（2.5s 窗口 + 5s 静默 = 7.5s），两个都想开时建议只留一个。
+
+### 没人叫她，她自己想起来找你（主动搭话）
+
+默认**关**（`proactiveEnabled`）。打开后每 60 秒看一次该不该开口，
+真正开口还要过四道闸：
+
+| 闸 | 默认 | 配置 |
+|---|---|---|
+| 静默时段 | 23:00–08:00 不打扰 | `proactiveQuietFrom` / `proactiveQuietTo` |
+| 空闲够久 | 6 小时 | `proactiveIdleHours` |
+| 当日配额 | 1 次 | `proactiveDailyMax` |
+| 没被回应的退避 | 2ⁿ 倍，封顶 4 倍 | `proactiveBackoffMax` |
+
+关键点：这一层**不自己写文案**。它只是往同一个会话里投一条内部来信：
+
+```
+（主动搭话：距上次说话已经 7 小时。上次聊到「…」，可以从「…」接着聊。
+想说什么就说……但这事你自己定：没什么想说的就 qq_pass，不用硬找话。）
+```
+
+于是「说」还是「不说」仍然由模型判断，转发 / 分条 / 抑制标记全部复用原链路。
+硬拼一句「在吗」发出去，就退化成定时问候机器人了 —— 这是这条设计的红线。
+
+状态落在 `~/.dsh/qq-bridge-proactive.json`（重启不丢，否则每次重启都重新「攒够 6 小时」或把日配额清零）。
+设置页有「现在试一次」，跳过所有闸立刻投一次（开关关着也能试）。
+
+**对谁开口**：`proactiveTargets` 是白名单，元素形如 `private:1000000001`。
+
+- **空数组 = 所有已绑会话的私聊**（默认，也是升级上来的老行为）；
+- 非空 = 只对名单里的人算，名单外的连「该不该说」都不判；
+- 只认私聊，群里不主动（`candidates()` 只取 `routes.private`，且必须有 sessionId）。
+
+设置页里是「所有已绑私聊 / 只对勾选的人」两选一 + 每人一行勾选框。从「所有人」取消一个人会自动展开成显式名单 ——
+因为空数组的语义是「全员」，直接把「取消某个人」写成空数组会得到完全相反的结果。
+每行还有「对TA试一次」（`POST /proactive-now {only}`），可以只对某个人手动开一次口，不用来回改名单。
+
 ## 能力
 
 | 能力 | 说明 |
@@ -102,8 +175,31 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 | 发表情 | 正文写 `[表情:呲牙]`，或 `qq_send` 带 `emoji` |
 | 商城大表情 | `qq_send` 带 `custom_emoji`（需先收藏进账号收藏夹） |
 | 图片理解 | QQ 图片下载后进 DSH 附件库，作为 image 块投进会话 —— **模型真能看见图** |
-| 按标点分条发送 | 带随机延时，更像真人 |
-| 设置页 UI | 设置 → **QQ 桥接** |
+| 按标点分条发送 | 带随机延时，更像真人；模型也能用 `segments` 自己指定切几条 |
+| 连发合并 | 私聊连发几条先攒一会儿再一起回（`mergeWindowMs`，0 = 关），不再被连问三遍 |
+| 主动搭话 | 没人叫她时自己想起来找你（默认关，四道闸 + 退避；可选只对指定的人开口；设置页可「现在试一次」/「对TA试一次」） |
+| 设置页 UI | 设置 → **QQ 桥接**：顶部一排功能分区（概览 / 绑定 / 对话节奏 / 主动搭话 / 关系记忆 / 推送 / 高级），点进去只看那一块 |
+
+### 设置页能调什么
+
+顶上一排是功能分区，一次只显示一块；「保存」和「重新载入」始终在右上角。
+
+| 分区 | 内容 |
+|---|---|
+| **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
+| 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数） |
+| **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
+| **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
+| **推送** | `wsEnabled`、WS 地址与 token、自动发现（读 SnowLuma 配置） |
+| **高级** | 分条字数与间隔、轮询间隔、群上下文条数、正文前缀、图片目录、对外发布确认等 |
+| **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 记了几条 / 说过几句）、一键清空 |
+| 推送 | WS 开关、地址、token（留空 = 保持原样）、自动发现 |
+| 高级设置 | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、正文前缀、图片副本目录、只在 @ 时响应、按标点分条、冷启动会话、说说必须带 `confirm` |
+
+**不给控件的**：`token` / `wsToken`（凭据）、`onebotHttp`（装机配置）、`fallbackToLiveSession`（会绕过路由表）、
+`allowSendToAny`（安全逃生阀）、`enabled`（只在加载时读一次，放按钮会误导成即时生效 —— 页面只在它为 `false` 时显示告警）。
+这批「故意不给控件」的字段在 `tests/ui-wiring.mjs` 里有白名单和理由，新加配置忘了接 UI 会直接测试失败。
 
 **不接**：群信息检索、撤回消息、表情回应、发图片到空间。
 
@@ -338,6 +434,10 @@ entries 里没有自己的插件 id = 没进 graph。常见原因是 `package.js
 
 ```bash
 npm test                              # 跑全部离线自测
+node tests/ui-wiring.mjs              # 设置页 ↔ 配置项一致性（死配置 / 漏接 UI / 过时文案）
+node tests/merge-sim.mjs              # 合并窗口（窗口内合并 / 上限截断 / 失败回滚接线）
+node tests/proactive-sim.mjs          # 主动搭话的四道闸（静默 / 空闲 / 配额 / 退避）+ 白名单选人
+node tests/client-render.mjs          # 设置页真渲染（每个分区都过一遍，含选人名单）
 node tests/sync-sim.mjs               # 检查运行副本的模块完整性 + 工具注册 + 包名一致性
 node tests/assert.mjs                 # 断言套件（分条 / 出站队列竞态 / 增量扫描 / 群缓冲）
 ```
@@ -355,15 +455,15 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-29 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+31 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） |
-| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
+| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（9 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） |
+| 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） |
 
@@ -403,8 +503,8 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 9 个工具、设置页 API、主动发消息接口、回复转发队列 |
-| 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送 |
+| 立即 | 插件加载时 | 注册 10 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
 - **探活用 `get_login_info`**：它要真的进了 QQ 才应答，是「能干活了」的准信儿。退避 1s→5s，总超时 150s。
