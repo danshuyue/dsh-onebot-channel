@@ -66,7 +66,16 @@ function arrayOf(name) {
   const block = apiSrc.slice(start, apiSrc.indexOf(']', start))
   return [...block.matchAll(/'([A-Za-z][A-Za-z0-9]*)'/g)].map((m) => m[1])
 }
-const writable = [...arrayOf('NUMERIC_FIELDS'), ...arrayOf('BOOLEAN_FIELDS'), ...arrayOf('STRING_FIELDS'), ...arrayOf('ARRAY_FIELDS')]
+const writable = [
+  ...arrayOf('NUMERIC_FIELDS'),
+  ...arrayOf('BOOLEAN_FIELDS'),
+  ...arrayOf('STRING_FIELDS'),
+  ...arrayOf('ARRAY_FIELDS'),
+  // 枚举字段（splitMode）是对象不是数组，单独取键
+  ...[...apiSrc
+    .slice(apiSrc.indexOf('export const ENUM_FIELDS'), apiSrc.indexOf('}', apiSrc.indexOf('export const ENUM_FIELDS')))
+    .matchAll(/^ {2}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
+]
 const bogus = writable.filter((k) => !defaultKeys.includes(k))
 ok(writable.length >= 20, `可写字段 ${writable.length} 个`)
 ok(bogus.length === 0, `可写字段都是真配置${bogus.length ? '，假的：' + bogus.join(', ') : ''}`)
@@ -147,6 +156,25 @@ ok(clientSrc.includes('toggleTarget'), '能单独勾/取消一个人')
 ok(clientSrc.includes('对TA试一次'), '每个人都能单独试一次')
 ok(apiSrc.includes("body?.only"), '/proactive-now 支持指定对象（only）')
 ok(apiSrc.includes('ARRAY_FIELDS'), '后端接受数组型字段（proactiveTargets）')
+
+// ---- 8c. 手动触发要轮转（0.9.2）-------------------------------------------
+// 踩过：固定打候选列表第一个，连点三次全发给同一个人，另一个号永远轮不到。
+const proactiveSrc = read('lib/proactive.js')
+ok(proactiveSrc.includes('orderByStalest'), '候选按「最久没被找过」排序')
+ok(proactiveSrc.includes('next'), '状态里给出「下一个轮到谁」')
+ok(clientSrc.includes('下一个轮到'), '设置页告诉用户这次打给谁')
+
+// ---- 8d. 分条依据（0.10.0）-----------------------------------------------
+// 用户原话：「不是单纯的标点符号切分」—— 说几条要由她自己用换行决定。
+ok(defaultKeys.includes('splitMode'), 'splitMode 有默认值')
+ok(apiSrc.includes('splitMode'), 'API 暴露并校验 splitMode')
+ok(clientSrc.includes('splitMode'), '设置页有「怎么分条」的控件')
+ok(clientSrc.includes('按换行分') && clientSrc.includes('按句末标点切'), '两种模式都能选')
+const splitSrc = read('lib/split.js')
+ok(/mode !== 'paragraph'/.test(splitSrc), 'split.js 里 paragraph 模式不按句号切')
+ok(/mode === 'paragraph' \? isPunctOnly/.test(splitSrc), 'paragraph 模式不按字数合并短行')
+ok(read('lib/outbound.js').includes("config.splitMode === 'sentence'"), '转发链把 splitMode 传给了切分器')
+ok(read('docs/QQ对话说明.md').includes('换行 = 另起一条'), '对话说明里告诉了模型「换行就是分条」')
 ok(clientSrc.includes('qqb-warn'), '插件被停用时页面会显式告警')
 
 // ---- 9. 过时文案不再出现 ----------------------------------------------------

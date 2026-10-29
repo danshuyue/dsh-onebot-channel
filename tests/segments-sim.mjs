@@ -5,7 +5,7 @@
  *   1. 传 segments 就按模型给的分段发，**不再**按标点切
  *   2. 同时给 text 和 segments 时，text 被忽略（分段才是话）
  *   3. 空段丢掉
- *   4. 不传 segments 时仍按标点切（旧行为不能坏）
+ *   4. 不传 segments 时按换行分条（0.10.0 起；句号不再拆）
  *
  * 网络层用 globalThis.fetch 假协议端，不碰真 QQ。
  */
@@ -84,11 +84,14 @@ await sendToQQ(target, '', { segments: ['甲', '   ', '', '乙'] })
 eq(sent.length, 2, '空段被丢掉')
 eq(sent.flatMap(textsOf), ['甲', '乙'], '只发有内容的段')
 
-// 4. 不传 segments：旧行为（按句末标点切）
-//    注意每句要超过 splitMinChars（4 字），否则会被当成碎片并进前一段
+// 4. 不传 segments：0.10.0 起按**换行**分条，句号不再拆
 sent.length = 0
 await sendToQQ(target, '第一句话在这里。第二句话也在这里。', {})
-ok(sent.length >= 2, `不传 segments 时仍按标点切（实际 ${sent.length} 条）`)
+ok(sent.length === 1, `不传 segments 且没换行 → 一整条（实际 ${sent.length} 条）`)
+
+sent.length = 0
+await sendToQQ(target, '第一句。\n第二句也在这一行里。', {})
+ok(sent.length === 2, `不传 segments 时按换行分条（实际 ${sent.length} 条）`)
 
 // 5. 只给一段就发一条
 sent.length = 0

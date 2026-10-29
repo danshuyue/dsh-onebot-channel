@@ -95,6 +95,7 @@ const fakeState = {
   proactive: {
     count: 1,
     targets: ['private:3472302240'],
+    next: { key: 'private:3472302240', uin: '3472302240' },
     peers: [{ key: 'private:3472302240', uin: '3472302240', available: true, enabled: true, lastProactiveAt: Date.parse('2026-10-29T02:00:00Z'), lastIncomingAt: Date.parse('2026-10-28T20:00:00Z'), countToday: 1, unanswered: 0, reason: 'daily-quota', eligibleAt: 0 }]
   },
   merge: { settings: { windowMs: 2500, maxWaitMs: 15000, maxMessages: 10 }, pools: [{ uin: '3472302240', count: 2, waitedMs: 800 }] }
@@ -150,7 +151,7 @@ seeds = [
     mergeWindowMs: 2500, mergeMaxWaitMs: 15000, mergeMaxMessages: 10,
     proactiveEnabled: true, proactiveIdleHours: 6, proactiveDailyMax: 1,
     proactiveQuietFrom: '23:00', proactiveQuietTo: '08:00', proactiveBackoffMax: 4,
-    proactiveTargets: []
+    proactiveTargets: [], splitMode: 'paragraph'
   },
   'overview',
   'all'
@@ -220,6 +221,8 @@ ok(binding.includes('未绑定'), '绑定页有「未绑定（忽略）」这一
 const stance = paint('stance')
 ok(stance.includes('合并窗口') && stance.includes('回复前静默'), '对话节奏页有合并窗口与静默')
 ok(stance.includes('判断收尾') || stance.includes('允许判断收尾'), '对话节奏页有收尾开关')
+ok(stance.includes('怎么分条'), '对话节奏页有「怎么分条」下拉（0.10.0）')
+ok(stance.includes('按换行分'), '下拉里有「按换行分」这个选项')
 
 // ---- 4. 主动搭话：能选人（0.9.1 新） ----
 const proactive = paint('proactive')
@@ -227,6 +230,7 @@ ok(proactive.includes('对谁开口'), '主动搭话页有「对谁开口」')
 ok(proactive.includes('所有已绑私聊') && proactive.includes('只对勾选的人'), '两种模式都能选')
 ok(proactive.includes('3472302240'), '名单里列出了已绑会话的人')
 ok(proactive.includes('对TA试一次'), '每个人都能单独试一次')
+ok(proactive.includes('下一个轮到'), '「现在试一次」会写明这次轮到谁（0.9.2）')
 ok(proactive.includes('静默开始'), '闸门参数还在')
 
 // 名单行里勾选状态：全员模式 → 全勾

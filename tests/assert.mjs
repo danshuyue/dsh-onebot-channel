@@ -31,22 +31,48 @@ function eq(actual, expected, name) {
 // ---- split.js ----
 
 console.log('split.js：')
+// ---- 0.10.0：默认按换行分条，句号不再拆 ----
+{
+  const parts = splitMessage('今天天气不错。我们去吃饭吧！好呀。')
+  eq(parts, ['今天天气不错。我们去吃饭吧！好呀。'], '默认（paragraph）不按句号拆：一整段就是一条')
+}
+{
+  const parts = splitMessage('我跟你说\n那个事搞定了\n不过还差一点')
+  eq(parts, ['我跟你说', '那个事搞定了', '不过还差一点'], '换一行 = 另起一条')
+}
+{
+  const parts = splitMessage('嗯\n好\n啊')
+  eq(parts.length, 3, 'paragraph 模式不按字数合并短行（换行是她自己划的分条线）')
+}
+{
+  const parts = splitMessage('我跟你说\n\n那个事搞定了')
+  eq(parts.length, 2, '空行不产生空消息')
+}
+{
+  const parts = splitMessage('一整段话。\n。\n再接一句')
+  eq(parts.length, 2, '单独一行的纯标点并进相邻条（手滑碎片）')
+}
+// ---- sentence 模式：老行为，必须还在（想切回一句一条时用）----
 {
   // 「好呀。」只有 3 字 < minChars(4)，按设计并进前一条
-  const parts = splitMessage('今天天气不错。我们去吃饭吧！好呀。')
-  eq(parts, ['今天天气不错。', '我们去吃饭吧！好呀。'], '按句末标点切（短尾并入前条）')
+  const parts = splitMessage('今天天气不错。我们去吃饭吧！好呀。', { mode: 'sentence' })
+  eq(parts, ['今天天气不错。', '我们去吃饭吧！好呀。'], 'sentence：按句末标点切（短尾并入前条）')
 }
 {
-  const parts = splitMessage('今天天气不错。我们去吃饭吧！好的没问题。')
-  eq(parts, ['今天天气不错。', '我们去吃饭吧！', '好的没问题。'], '按句末标点切（都够长时逐条切）')
+  const parts = splitMessage('今天天气不错。我们去吃饭吧！好的没问题。', { mode: 'sentence' })
+  eq(parts, ['今天天气不错。', '我们去吃饭吧！', '好的没问题。'], 'sentence：都够长时逐条切')
 }
 {
-  const parts = splitMessage('嗯。好。')
-  eq(parts.length, 1, '太短的碎片并进相邻条')
+  const parts = splitMessage('嗯。好。', { mode: 'sentence' })
+  eq(parts.length, 1, 'sentence：太短的碎片并进相邻条')
 }
 {
-  const parts = splitMessage('一。二。三。四。五。六。', { maxParts: 3 })
+  const parts = splitMessage('一。二。三。四。五。六。', { mode: 'sentence', maxParts: 3 })
   ok(parts.length <= 3, '段数不超上限')
+}
+{
+  const parts = splitMessage('一。二。\n三。四。五。', { mode: 'sentence', maxParts: 2 })
+  ok(parts.length <= 2, 'sentence 模式下换行也断条，且受上限约束')
 }
 {
   const long = '这是一段没有任何句末标点的很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长的话'

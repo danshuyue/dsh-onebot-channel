@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import {
   shouldNudge, minutesOf, inQuietHours, dayKey, formatGap,
   notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE,
-  targetAllowed, candidates
+  targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
 
 const TMP = join(tmpdir(), `qq-proactive-test-${process.pid}.json`)
@@ -176,6 +176,28 @@ ok(targetAllowed({ proactiveTargets: ['private:100', 'private:100'] }, 'private:
 
   cfg.proactiveTargets = ['private:300']
   ok(candidates(cfg).length === 0, '只勾了没绑会话的人 → 一个候选都没有')
+}
+
+// ---- 13. 手动「现在试一次」要轮转（0.9.2）----------------------------------
+// 踩过：手动触发固定打候选列表第一个，连点三次全发给同一个人，
+// 另一个号永远轮不到 —— 用户看到的就是「另一个对话没收到」。
+console.log('\n主动搭话 · 手动触发轮到谁：')
+{
+  clearProactiveState()
+  noteNudge('private:100', NOW) // 100 刚被主动过
+  const rotated = orderByStalest([{ key: 'private:100' }, { key: 'private:200' }])
+  ok(rotated[0].key === 'private:200', '刚主动过的人排到后面 → 连点会换人')
+  ok(rotated.length === 2, '排序不会丢人')
+
+  clearProactiveState()
+  const stable = orderByStalest([{ key: 'private:b' }, { key: 'private:a' }])
+  ok(stable[0].key === 'private:a', '都没主动过时按 key 稳定排序（不随机）')
+
+  noteNudge('private:b', NOW)
+  ok(orderByStalest([{ key: 'private:b' }, { key: 'private:a' }])[0].key === 'private:a',
+    '只有 b 主动过 → 下次轮到 a')
+  ok(orderByStalest([{ key: 'private:b' }, { key: 'private:a' }])[0].key !== 'private:b',
+    '同一个对象不会连着被手动触发两次')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)

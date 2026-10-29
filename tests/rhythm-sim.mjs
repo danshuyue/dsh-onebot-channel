@@ -10,7 +10,7 @@
  * 纯逻辑 + 短定时，不碰真 QQ、不碰真会话。
  */
 import { assessClosure, classifyUtterance, describeClosure } from '../lib/closure.js'
-import { targetKey, suppress, consumeSuppress, suppressedKeys, waitQuiet, markIncoming, clampLimit, SUPPRESS_TTL_MS } from '../lib/rhythm.js'
+import { targetKey, suppress, consumeSuppress, suppressedKeys, waitQuiet, markIncoming, clampLimit, SUPPRESS_TTL_MS, isStageOnly } from '../lib/rhythm.js'
 
 let passed = 0
 let failed = 0
@@ -171,6 +171,17 @@ console.log('rhythm · 限额：')
   eq(clampLimit('abc', 0, 0, 60000), 0, '非数字回默认值')
   eq(clampLimit(999999, 0, 0, 60000), 60000, '超上限被夹住')
   eq(clampLimit(-5, 0, 0, 60000), 0, '负数被夹住')
+}
+
+console.log('rhythm · 「只有动作」的判定（主动搭话回合用）：')
+{
+  eq(isStageOnly('（尾巴慢慢摆了两下，趴在窗边没出声）'), true, '整条都是括号动作 → 算沉默')
+  eq(isStageOnly('（耳朵动了动，继续安静待着）……'), true, '动作 + 省略号 → 还是沉默')
+  eq(isStageOnly('（安静趴着，耳朵偶尔抖一下）\n（尾巴卷了一下）'), true, '多条动作拼起来 → 沉默')
+  eq(isStageOnly('（笑）好呀，那我在教室等你'), false, '动作 + 真话 → 照发')
+  eq(isStageOnly('嗯'), false, '一个字也是话')
+  eq(isStageOnly('[表情:呲牙]'), false, '只有表情标记不算动作描写（表情本身是能发的）')
+  eq(isStageOnly('   '), true, '纯空白 → 没什么可发')
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
