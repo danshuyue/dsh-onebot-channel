@@ -87,6 +87,8 @@ const fakeState = {
     proactiveTargets: ['private:3472302240']
   },
   ws: { connected: true },
+  // 0.10.1：概览要能回答「现在跑的到底是哪一版」
+  runtime: { version: '0.10.1', pid: 19472, bootAt: '2026-10-29T03:08:11.000Z' },
   routes: { private: { '3472302240': { sessionId: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7' } }, group: {} },
   sessions: [{ id: 'session-96114c67-e927-4b0c-83c8-f7c3de1c65f7', title: 'QQ 聊天账号转交', cwd: 'D:\\DSH workspace\\QQ对话', updatedAt: '2026-10-26T10:02:08.333Z' }],
   friends: [{ id: '3472302240', name: '求道者见月' }],
@@ -210,6 +212,8 @@ ok(overview.includes('现在在跑什么'), '概览页有状态摘要')
 ok(overview.includes('待合并') && overview.includes('今天主动'), '概览页有统计块（待合并 / 今天主动）')
 ok(overview.includes('已连'), '概览页反映推送已连')
 ok(overview.includes('指定的 1 人'), '概览页写明主动搭话只对指定的人生效')
+ok(overview.includes('这版代码') && overview.includes('0.10.1') && overview.includes('19472'),
+  '概览首页显示版本号与进程 pid（改了代码没生效时先看这行）')
 
 // ---- 2. 绑定页：会话下拉、没绑定提示、前缀输入框 ----
 const binding = paint('binding')
