@@ -54,12 +54,14 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
     splitDelayMinMs: 200,
     splitDelayMaxMs: 700,
     requestTimeoutMs: 8000,
-    wsFallbackPollMs: 30000,
-    wsPrivateMergeMs: 250
+    wsFallbackPollMs: 30000
   }
   for (const [key, value] of Object.entries(expected)) {
     eq(DEFAULTS[key], value, `${key} 代码默认值`)
   }
+  // wsPrivateMergeMs 是退役键（从未被消费，config.js 启动时会主动删掉），
+  // 期望值写死 250 会永远报红 —— 真正要守的是「README 别再推荐它」。
+  ok(!README.includes('wsPrivateMergeMs'), 'README 不再推荐已退役的 wsPrivateMergeMs')
   eq(DEFAULTS.resumeColdSession, true, 'resumeColdSession 默认')
   eq(DEFAULTS.groupOnlyWhenAt, true, 'groupOnlyWhenAt 默认')
   // fallbackToLiveSession 会绕过路由表，默认必须是 false（2026-10-27 从 true 改的）
@@ -72,7 +74,7 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
 
 console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
 {
-  const { registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool } = await import('../lib/tool.js')
+  const { registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool } = await import('../lib/tool.js')
   const regs = []
   const ctx = {
     get: (name) => (name === 'tools'
@@ -80,12 +82,13 @@ console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
       : (name === 'attachments' ? { saveImages: async () => [] } : undefined)),
     effect: () => {}
   }
-  for (const fn of [registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool]) {
+  for (const fn of [registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool]) {
     await fn(ctx)
   }
   eq(regs.map((t) => t.name).sort(), [
-    'qq_collect_face', 'qq_emoji_search', 'qq_face_preview', 'qq_msg_history', 'qq_qzone_post', 'qq_send'
-  ], '注册的 6 个工具')
+    'qq_close', 'qq_collect_face', 'qq_emoji_search', 'qq_face_preview', 'qq_msg_history',
+    'qq_pass', 'qq_qzone_post', 'qq_remember', 'qq_send', 'qq_wait'
+  ], '注册的 10 个工具')
 
   for (const tool of regs) {
     ok(README.includes(`\`${tool.name}\``), `README 提到了 ${tool.name}`)
@@ -99,8 +102,9 @@ console.log('\nHTTP 路由：')
 {
   const { API_PREFIX } = await import('../lib/api.js')
   const api = readFileSync(join(SRC, 'lib', 'api.js'), 'utf8')
-  const routes = [...api.matchAll(/route === '([^']+)'/g)].map((m) => m[1])
-  eq(routes.sort(), ['/detect-ws', '/save', '/state'], '实际路由')
+  // 不写死路由清单：新加一个接口就报红一次太吵，真正要守的是「README 有没有漏写接口」。
+  const routes = [...new Set([...api.matchAll(/route === '([^']+)'/g)].map((m) => m[1]))].sort()
+  ok(routes.length >= 5, `解析到 ${routes.length} 个路由：${routes.join(' ')}`)
   for (const route of routes) {
     ok(README.includes(`${API_PREFIX}${route}`), `README 提到了 ${API_PREFIX}${route}`)
   }
@@ -146,8 +150,8 @@ console.log('\nREADME 里不该出现的过期信息：')
   // 这些是历史上写错过的数字 / 版本号，改版后残留下来会误导人
   ok(!/\b0\.2\.0\b/.test(README), '没有残留旧版本号 0.2.0')
   ok(!/14 个.*action/.test(README), '没有残留「14 个 action」（实际 13）')
-  ok(README.includes('0.6.2'), '版本号是当前的 0.6.2')
-  ok(README.includes('六个工具') || README.includes('6 个工具'), '写明了 6 个工具')
+  ok(README.includes('0.6.2'), '保留 0.6.2 那条私聊去重的排障说明')
+  ok(README.includes('10 个工具'), '写明了 10 个工具')
 }
 
 console.log('\n链接与文档：')

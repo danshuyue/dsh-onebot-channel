@@ -47,9 +47,9 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
-| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `timeout` |
-| `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | — |
-| `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` |
+| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
+| `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
+| `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
 | `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
 
 ```jsonc
@@ -199,19 +199,15 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 | 分区 | 内容 |
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
-
-「现在在跑什么」第一行是**这版代码的版本号 + 进程 pid + 启动时间**（0.10.1 补）。
-改完代码发现行为没变，先看一眼这行：版本没涨、启动时间还是上午 —— 说明主进程仍在跑旧代码，重启即可，不用怀疑改错了。
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数） |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
-| **推送** | `wsEnabled`、WS 地址与 token、自动发现（读 SnowLuma 配置） |
-| **高级** | 分条字数与间隔、轮询间隔、群上下文条数、正文前缀、图片目录、对外发布确认等 |
-| **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 记了几条 / 说过几句）、一键清空 |
-| 推送 | WS 开关、地址、token（留空 = 保持原样）、自动发现 |
-| 高级设置 | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、正文前缀、图片副本目录、只在 @ 时响应、冷启动会话、说说必须带 `confirm` |
-| 对话节奏（续） | `splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
+| **推送** | `wsEnabled`、WS 地址与 token（留空 = 保持原样）、自动发现（读 SnowLuma 配置） |
+| **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、正文前缀、图片副本目录、只在 @ 时响应、冷启动会话、说说必须带 `confirm` |
+
+概览里「现在在跑什么」的第一行是**这版代码的版本号 + 进程 pid + 启动时间**（0.10.1 补）。
+改完代码发现行为没变，先看一眼这行：版本没涨、启动时间还是上午 —— 说明主进程仍在跑旧代码，重启即可，不用怀疑改错了。
 
 **不给控件的**：`token` / `wsToken`（凭据）、`onebotHttp`（装机配置）、`fallbackToLiveSession`（会绕过路由表）、
 `allowSendToAny`（安全逃生阀）、`enabled`（只在加载时读一次，放按钮会误导成即时生效 —— 页面只在它为 `false` 时显示告警）。
@@ -278,7 +274,6 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
   "wsUrl": "ws://127.0.0.1:3001",            // 留空 = 自动去协议端配置里发现
   "wsToken": "…",                            // ⚠️ 与上面的 http token 是两套，不能混用
   "wsFallbackPollMs": 30000,                 // WS 通着时，轮询降频到多少毫秒一次
-  "wsPrivateMergeMs": 250,                   // 私聊 WS 消息的合并窗口
 
   // ---- 私聊 ----
   "peerUin": 1000000001,                     // 监听的好友 QQ 号
@@ -364,13 +359,15 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 
 ## HTTP 接口
 
-插件自带三个同源接口（设置页用的也是它们）：
+插件自带五个同源接口（设置页用的也是它们）：
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | GET | `/api/qq-bridge/state` | 配置（不含 token）+ 路由表 + 会话列表 + 好友/群列表 + 机器人信息 |
 | POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置 |
 | POST | `/api/qq-bridge/detect-ws` | 自动发现协议端的 WS 接入点 |
+| POST | `/api/qq-bridge/memory-clear` | 清空整张关系卡表（不可撤销，设置页里有二次确认） |
+| POST | `/api/qq-bridge/proactive-now` | 跳过闸门立刻试一次主动搭话；`{ "only": "private:1000000001" }` 可指定对象，不传按轮转选人 |
 
 另有一个独立的主动发消息接口（端口默认 39273），给 agent 之外的程序用：
 
@@ -473,17 +470,17 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-31 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+38 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
-| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） |
-| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
+| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
+| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
 | 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
-| 安全 | `blocked.js`（13 个 action 物理封禁） |
+| 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
 各模块的详细职责和踩坑见 [docs/开发笔记.md](docs/开发笔记.md)。
 
@@ -547,4 +544,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-29 · v0.10.1*
+*最后更新：2026-10-30 · v0.11.0*

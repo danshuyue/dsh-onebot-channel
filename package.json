@@ -43,7 +43,7 @@
     }
   },
   "scripts": {
-    "test": "node tests/assert.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs",
+    "test": "node tests/readme-sim.mjs && node tests/assert.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs",
     "test:legacy": "node tests/group-context-sim.mjs; node tests/identity-sim.mjs; node tests/capability-sim.mjs; node tests/outbound-sim.mjs",
     "test:rhythm": "node tests/rhythm-sim.mjs",
     "test:memory": "node tests/memory-sim.mjs",
