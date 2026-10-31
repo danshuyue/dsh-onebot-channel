@@ -132,7 +132,7 @@ console.log('emoji-mark.js · 标记解析：')
 
 console.log('emoji-mark.js · 分配到各条：')
 {
-  // 「第一句。第二句[表情:OK]」→ 表情跟第二句（index=8，落��第二条末尾）
+  // 「第一句。第二句[表情:OK]」→ 表情跟第二句（index=8，落在第二条末尾）
   const parts = ['第一句。', '第二句']
   const r = attachFacesToParts(parts, [{ id: 124, index: 8 }])
   eq(r[0].faces, [], '第一句没挂表情')
