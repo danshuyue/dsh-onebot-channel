@@ -3,6 +3,12 @@ node_modules/
 dist/
 *.tgz
 
+# 本地文档（不进仓库、不推送）。注意：docs/ 下上游已有的三份文档仍照常跟踪，
+# 所以这里只忽略本地新增的那几份，不能整目录忽略。
+docs/维护索引.md
+docs/会话设定-设计稿.md
+docs/水群潜水-设计稿.md
+
 # 本地配置与运行数据（绝不能进仓库）
 qq-bridge.config.json
 qq-bridge-state.json
@@ -14,6 +20,9 @@ qq-bridge-load.log
 .idea/
 .DS_Store
 Thumbs.db
+
+# CodeGraph 本地索引（3.7 MB 的 SQLite，可随时重建：codegraph init）
+.codegraph/
 
 # 大改之前的本地备份（形如 lib.bak-20261028-142548/）
 *.bak-*/
