@@ -12,10 +12,13 @@
  * 跑法：node tests/archive-image-sim.mjs
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const SANDBOX_HOME = join(tmpdir(), `qq-bridge-archive-${process.pid}`)
+// 沙箱放在插件目录**之外**：这台机器上插件目录树的权限继承被断开了，
+// 子进程在里面 mkdir 会 EPERM（实测），而上级 DSHPlugins 目录可写。
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SANDBOX_HOME = join(HERE, '..', '..', '.tmp-test', `archive-${process.pid}`)
 const SANDBOX_DATA = join(SANDBOX_HOME, '.dsh')
 mkdirSync(join(SANDBOX_DATA, 'storages'), { recursive: true })
 // env.js 在 import 时就算 DATA_DIR，所以必须先设 HOME 再动态 import

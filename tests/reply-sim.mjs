@@ -159,7 +159,9 @@ try {
 
   const outSrc = readFileSync(new URL('../lib/outbound.js', import.meta.url), 'utf8')
   ok(/replyTo: String\(options\?\.replyTo/.test(outSrc), 'enqueueOutbound 存了 replyTo')
-  ok(/sendToQQ\(entry\.target, text, \{ replyTo: entry\.replyTo \}\)/.test(outSrc), '自动转发把 replyTo 用上了')
+  // 断言「自动转发把 replyTo 传下去了」，但别钉死整行 ——
+  // 0.14.0 加了 atUin 之后这行多了一个参数，钉死整行会让测试变脆。
+  ok(/sendToQQ\(entry\.target, text, \{[^}]*replyTo: entry\.replyTo/.test(outSrc), '自动转发把 replyTo 用上了')
 
   const toolSrc = readFileSync(new URL('../lib/tool.js', import.meta.url), 'utf8')
   ok(/reply_to: \{/.test(toolSrc), 'qq_send 的参数里声明了 reply_to')
