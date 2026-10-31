@@ -1,6 +1,6 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.14.0",
+  "version": "0.14.1",
   "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
   "keywords": [
     "dsh-plugin",
@@ -23,12 +23,16 @@
     ".": "./lib/index.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json",
-    "./client": "./lib/client.js"
+    "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
   },
   "files": [
     "lib",
     "docs",
+    "locale",
     "cordis.patch.yml",
+    "icon.svg",
     "README.md",
     "LICENSE"
   ],
@@ -65,10 +69,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/danshuyue/dsh-onebot-channel.git"
+    "url": "git+https://github.com/yansunsky/dsh-onebot-channel.git"
   },
   "bugs": {
-    "url": "https://github.com/danshuyue/dsh-onebot-channel/issues"
+    "url": "https://github.com/yansunsky/dsh-onebot-channel/issues"
   },
-  "homepage": "https://github.com/danshuyue/dsh-onebot-channel#readme"
+  "homepage": "https://github.com/yansunsky/dsh-onebot-channel#readme"
 }
