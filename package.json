@@ -1,7 +1,7 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.11.0",
-  "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
+  "version": "0.11.1",
+  "description": "鎶?QQ 绉佽亰涓庣兢鑱婄粡 OneBot 11 鍗忚鎺ヨ繘 DeepSeek Harness锛歐ebSocket 浜嬩欢鎺ㄩ€佸叆绔欙紝agent.followup 鍞ら啋浼氳瘽锛屾彁渚?qq_send 绛夊伐鍏峰洖鍙戞秷鎭€佸彂琛ㄦ儏銆佹敹钘忚〃鎯呭寘銆佹煡琛ㄦ儏鐩綍涓庢秷鎭巻鍙层€佸彂琛?QQ 绌洪棿璇磋銆?,
   "keywords": [
     "dsh-plugin",
     "deepseek",
@@ -15,7 +15,7 @@
     "onebot11",
     "snowluma"
   ],
-  "author": "单树见月 <3472302240@qq.com>",
+  "author": "鍗曟爲瑙佹湀 <3472302240@qq.com>",
   "license": "MIT",
   "type": "module",
   "main": "lib/index.js",
