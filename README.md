@@ -43,7 +43,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 |---|---|---|
 | `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments` | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` |
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
-| `qq_msg_history` | 查群 / 好友历史消息 | `group_id` `user_id` `count` `before_message_id` |
+| `qq_msg_history` | 查群 / 好友历史消息（**返回的图能看见**，0.12.0） | `group_id` `user_id` `count` `before_message_id` |
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
@@ -186,7 +186,7 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 | 群聊带上下文 | 被 @ 时附带上次投递之后的未读群消息 |
 | 发表情 | 正文写 `[表情:呲牙]`，或 `qq_send` 带 `emoji` |
 | 商城大表情 | `qq_send` 带 `custom_emoji`（需先收藏进账号收藏夹） |
-| 图片理解 | QQ 图片下载后进 DSH 附件库，作为 image 块投进会话 —— **模型真能看见图** |
+| 图片理解 | QQ 图片下载后进 DSH 附件库，作为 image 块投进会话 —— **模型真能看见图**。三条路都通：入站投递、群 @ 的上下文、`qq_msg_history` 翻历史（后两条 0.12.0 补） |
 | 分条由她决定 | **正文换行 = 另起一条**（`splitMode: paragraph`，0.10.0 默认）；想回「一句一条」切成 `sentence`。带随机延时，模型也能用 `segments` 直接指定 |
 | 连发合并 | 私聊连发几条先攒一会儿再一起回（`mergeWindowMs`，0 = 关），不再被连问三遍 |
 | 主动搭话 | 没人叫她时自己想起来找你（默认关，四道闸 + 退避；可选只对指定的人开口；设置页可「现在试一次」/「对TA试一次」） |
@@ -470,14 +470,14 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-38 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+39 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
-| 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
+| 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
 | 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
@@ -544,4 +544,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-30 · v0.11.0*
+*最后更新：2026-10-31 · v0.12.0*
