@@ -274,13 +274,14 @@ reply + at + text   ← 原样
 | **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
-| **推送** | `wsEnabled`、WS 地址与 token（留空 = 保持原样）、自动发现（读 SnowLuma 配置） |
+| **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
 | **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、正文前缀、图片副本目录、只在 @ 时响应、冷启动会话、说说必须带 `confirm` |
 
 概览里「现在在跑什么」的第一行是**这版代码的版本号 + 进程 pid + 启动时间**（0.10.1 补）。
 改完代码发现行为没变，先看一眼这行：版本没涨、启动时间还是上午 —— 说明主进程仍在跑旧代码，重启即可，不用怀疑改错了。
+第二行「连接」会同时列出 HTTP 地址与 WS 连接状态（0.15.0 补），排查「消息收不到」时先看它。
 
-**不给控件的**：`token` / `wsToken`（凭据）、`onebotHttp`（装机配置）、`fallbackToLiveSession`（会绕过路由表）、
+**不给控件的**：`token` / `wsToken`（凭据，前端不回显；留空即保持原样）、`fallbackToLiveSession`（会绕过路由表）、
 `allowSendToAny`（安全逃生阀）、`enabled`（只在加载时读一次，放按钮会误导成即时生效 —— 页面只在它为 `false` 时显示告警）。
 这批「故意不给控件」的字段在 `tests/ui-wiring.mjs` 里有白名单和理由，新加配置忘了接 UI 会直接测试失败。
 
@@ -430,13 +431,14 @@ reply + at + text   ← 原样
 
 ## HTTP 接口
 
-插件自带五个同源接口（设置页用的也是它们）：
+插件自带六个同源接口（设置页用的也是它们）：
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | GET | `/api/qq-bridge/state` | 配置（不含 token）+ 路由表 + 会话列表 + 好友/群列表 + 机器人信息 |
-| POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置 |
+| POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置（含 `onebotHttp` / `token`，留空不覆盖） |
 | POST | `/api/qq-bridge/detect-ws` | 自动发现协议端的 WS 接入点 |
+| POST | `/api/qq-bridge/detect-http` | 自动发现协议端的 HTTP 接入点（读 `httpServers`，0.15.0） |
 | POST | `/api/qq-bridge/memory-clear` | 清空整张关系卡表（不可撤销，设置页里有二次确认） |
 | POST | `/api/qq-bridge/proactive-now` | 跳过闸门立刻试一次主动搭话；`{ "only": "private:1000000001" }` 可指定对象，不传按轮转选人 |
 
@@ -615,4 +617,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-31 · v0.14.0*
+*最后更新：2026-10-31 · v0.15.0*
