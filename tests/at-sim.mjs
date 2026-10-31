@@ -55,8 +55,9 @@ try {
   loadConfig()
   const cfg = getConfig()
   const { sendToQQ } = await import('../lib/outbound.js')
-  const GROUP = { kind: 'group', id: '975663147' }
-  const PRIVATE = { kind: 'private', id: '1321833118' }
+  // 测试用的号全是假的，跟真实 QQ 无关（别把个人号写进仓库）
+  const GROUP = { kind: 'group', id: '685694947' }
+  const PRIVATE = { kind: 'private', id: '1519605856' }
 
   // ---- 1. 段顺序与「只第一条」----
   console.log('段顺序与「只第一条」：')
