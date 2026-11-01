@@ -37,7 +37,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 10 个工具：
+装好之后 agent 有 11 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
@@ -51,6 +51,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
 | `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
+| `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -98,6 +99,36 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 `qq_close` 有硬约束：如果对方还有提问没回答，桥接会拒绝收摊，逼模型先把话接完再走。`qq_close` 写下的「下次怎么接」会在下次开场时自动带回，避免冷启动尬聊。
 
 更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
+
+### 戳一戳（0.16.5）
+
+QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插件对它完全没有反应 ——
+根因不是「没实现回戳」，而是**入站根本没接**：
+
+`handleWsEvent` 开头是 `if (event?.post_type !== 'message') return`，而戳一戳是
+`post_type: 'notice'` 事件。于是所有 notice 在那一行被无条件丢掉。
+现场证据：线上 WS 收到 115 个事件、其中 29 条是消息 —— 剩下 86 个全被吞掉，
+日志里 `grep notice` 计数是 **0**。
+
+现在两头都通了：
+
+| 方向 | 行为 |
+|---|---|
+| 别人戳她 | 起一轮，正文里写明「谁戳了谁 + 是用户本人还是群友」；同一处 10 秒内连戳只回一次（`pokeCooldownMs`） |
+| 群友互戳（没戳她） | 只记日志，不唤醒她 |
+| 她自己发起的戳 / 戳自己 | 忽略（防自问自答） |
+| 她主动戳人 | `qq_poke` 工具，走 `group_poke` / `friend_poke` |
+
+⚠️ **两种事件形状的 `user_id` 语义不一样**，这是真机抓包才发现的坑：
+
+```
+群戳：  { group_id, user_id:<戳人者>,   target_id:<被戳者> }
+私聊戳：{ user_id:<会话对端>, sender_id:<戳人者>, target_id:<被戳者> }
+```
+
+私聊戳的 `user_id` **不是**戳人者（SnowLuma 内部是 `peerUin`）。照抄 NapCat 文档
+直接读 `user_id` 会把「谁戳的」认错。统一判据是 `target_id === self_id`，
+两种形状下都成立。`tests/poke-sim.mjs` 里专门锁了这条。
 
 ### 收藏表情包：GIF 原样保留（0.16.4）
 
@@ -568,7 +599,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-40 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+41 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
@@ -576,8 +607,8 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
-| 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
+| 能力与 UI | `tool.js`（11 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
 各模块的详细职责和踩坑见 [docs/开发笔记.md](docs/开发笔记.md)。
@@ -616,7 +647,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 10 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 11 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
@@ -642,4 +673,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-11-02 · v0.16.3*
+*最后更新：2026-11-02 · v0.16.5*

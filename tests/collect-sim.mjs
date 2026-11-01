@@ -214,7 +214,82 @@ console.log('message_id：')
 imageDownload = null
 messageResult = null
 
-// ---- 5. findCustomFace 大小写 ----
+// ---- 5. SSRF 防御 ----
+
+console.log('直链白名单（防被指使去探内网）：')
+{
+  const { isFetchableImageUrl } = await import('../lib/collect.js')
+  // 公网图片直链：放行
+  ok(isFetchableImageUrl('https://multimedia.nt.qq.com.cn/download?appid=1407&fileid=x'), 'QQ 图片直链放行')
+  ok(isFetchableImageUrl('https://p.qpic.cn/qq_expression/1/2/0'), 'qpic 表情直链放行')
+  ok(isFetchableImageUrl('http://example.com/a.gif'), '普通公网 http 放行')
+  // 内网 / 本机 / 元数据：一律拒
+  ok(!isFetchableImageUrl('http://127.0.0.1:3000/'), '环回 127.0.0.1 拒绝')
+  ok(!isFetchableImageUrl('http://localhost:58434/api'), 'localhost 拒绝')
+  ok(!isFetchableImageUrl('http://192.168.79.128:3003/'), '内网 192.168 拒绝')
+  ok(!isFetchableImageUrl('http://10.0.0.1/x'), '私有 10/8 拒绝')
+  ok(!isFetchableImageUrl('http://172.16.0.1/x'), '私有 172.16/12 拒绝')
+  ok(!isFetchableImageUrl('http://169.254.169.254/latest/meta-data/'), '云元数据 169.254 拒绝')
+  ok(!isFetchableImageUrl('http://[::1]/x'), 'IPv6 环回拒绝')
+  ok(!isFetchableImageUrl('http://[fe80::1]/x'), 'IPv6 链路本地拒绝')
+  ok(!isFetchableImageUrl('file:///C:/Windows/win.ini'), 'file:// 拒绝（这不是直链）')
+  ok(!isFetchableImageUrl('ftp://example.com/a.gif'), 'ftp 拒绝')
+  ok(!isFetchableImageUrl(''), '空串拒绝')
+  ok(!isFetchableImageUrl('不是网址'), '垃圾串拒绝')
+}
+{
+  // 端到端：给了内网直链，collectFace 必须直接拒绝、且**不发任何请求**
+  const { collectFace } = await import('../lib/collect.js')
+  calls = []
+  imageDownload = null
+  let fetchCount = 0
+  const realFetch = globalThis.fetch
+  globalThis.fetch = async (...args) => { fetchCount += 1; return realFetch(...args) }
+  await throws(async () => {
+    await collectFace({ file: 'http://169.254.169.254/latest/meta-data/', desc: 'x' })
+  }, '内网直链被拒（元数据地址）')
+  eq(fetchCount, 0, '拒绝时不发任何 HTTP 请求（不是「先请求了再判」）')
+  globalThis.fetch = realFetch
+}
+
+// ---- 6. 第二层：DNS 解析后仍判内网 ----
+
+console.log('DNS 解析层（挡 nip.io 这类看着正常、解析到内网的域名）：')
+{
+  const { fetchImageBytes } = await import('../lib/images.js')
+  // 字面检查放行、解析后必须拒（真解析一次，不 mock —— 这就是它的价值）
+  await throws(async () => {
+    await fetchImageBytes('http://127.0.0.1.nip.io/x')
+  }, 'nip.io 解析到 127.0.0.1 → 拒')
+  await throws(async () => {
+    await fetchImageBytes('http://169.254.169.254/latest/meta-data/')
+  }, '字面元数据地址 → 拒（不发请求）')
+  await throws(async () => {
+    await fetchImageBytes('file:///C:/Windows/win.ini')
+  }, 'file:// 不是 http → 拒')
+}
+
+// ---- 7. isBlockedHost 的绕过写法 ----
+
+console.log('isBlockedHost（主机串的各种写法）：')
+{
+  const { isBlockedHost } = await import('../lib/collect.js')
+  ok(isBlockedHost('localhost.'), '末尾带点的 localhost.（绝对域名写法，实测漏过一次）')
+  ok(isBlockedHost('127.1'), '省略段写法 127.1')
+  ok(isBlockedHost('10.1'), '省略段写法 10.1（私有段）')
+  ok(isBlockedHost('0x7f.0.0.1'), '十六进制写法')
+  ok(isBlockedHost('2130706433'), '纯整数形式（=127.0.0.1）')
+  ok(isBlockedHost('0x7f000001'), '十六进制整数形式')
+  ok(isBlockedHost('169.254.169.254'), '云元数据地址')
+  ok(isBlockedHost('::ffff:7f00:1'), 'URL 规范化后的 IPv4 映射（不是点分写法）')
+  ok(isBlockedHost('0:0:0:0:0:0:0:1'), 'IPv6 环回长写法')
+  ok(isBlockedHost('fe80::1'), 'IPv6 链路本地')
+  ok(isBlockedHost('fc00::1'), 'IPv6 唯一本地')
+  ok(!isBlockedHost('multimedia.nt.qq.com.cn'), '正常公网域名放行')
+  ok(!isBlockedHost('8.8.8.8'), '公网 IP 放行')
+}
+
+// ---- 8. findCustomFace 大小写 ----
 
 console.log('findCustomFace：')
 {

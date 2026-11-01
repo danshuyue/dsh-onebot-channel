@@ -74,7 +74,7 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
 
 console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
 {
-  const { registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool } = await import('../lib/tool.js')
+  const { registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool, registerPokeTool } = await import('../lib/tool.js')
   const regs = []
   const ctx = {
     get: (name) => (name === 'tools'
@@ -82,13 +82,13 @@ console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
       : (name === 'attachments' ? { saveImages: async () => [] } : undefined)),
     effect: () => {}
   }
-  for (const fn of [registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool]) {
+  for (const fn of [registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool, registerPokeTool]) {
     await fn(ctx)
   }
   eq(regs.map((t) => t.name).sort(), [
     'qq_close', 'qq_collect_face', 'qq_emoji_search', 'qq_face_preview', 'qq_msg_history',
-    'qq_pass', 'qq_qzone_post', 'qq_remember', 'qq_send', 'qq_wait'
-  ], '注册的 10 个工具')
+    'qq_pass', 'qq_poke', 'qq_qzone_post', 'qq_remember', 'qq_send', 'qq_wait'
+  ], '注册的 11 个工具')
 
   for (const tool of regs) {
     ok(README.includes(`\`${tool.name}\``), `README 提到了 ${tool.name}`)
@@ -151,7 +151,7 @@ console.log('\nREADME 里不该出现的过期信息：')
   ok(!/\b0\.2\.0\b/.test(README), '没有残留旧版本号 0.2.0')
   ok(!/14 个.*action/.test(README), '没有残留「14 个 action」（实际 13）')
   ok(README.includes('0.6.2'), '保留 0.6.2 那条私聊去重的排障说明')
-  ok(README.includes('10 个工具'), '写明了 10 个工具')
+  ok(README.includes('11 个工具'), '写明了 11 个工具')
 }
 
 console.log('\n链接与文档：')
