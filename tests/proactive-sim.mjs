@@ -7,12 +7,12 @@
  *
  * 状态文件走临时路径，不碰 ~/.dsh/qq-bridge-proactive.json。
  */
-import { rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   shouldNudge, minutesOf, inQuietHours, dayKey, formatGap,
-  notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE,
+  notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE, flushPersist,
   targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
 
@@ -198,6 +198,34 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
     '只有 b 主动过 → 下次轮到 a')
   ok(orderByStalest([{ key: 'private:b' }, { key: 'private:a' }])[0].key !== 'private:b',
     '同一个对象不会连着被手动触发两次')
+}
+
+// ---- 跨天计数：昨天主动过 2 次，今天第一次必须从 1 开始 ----
+// 之前的 bug：noteNudge 只写 day、不清 countToday，于是昨天的次数被算进今天 ——
+// UI 上「今天 N 次」只涨不刷新，每日配额也会提前用完。
+{
+  clearProactiveState()
+  rmSync(TMP, { force: true })
+  const yesterday = NOW - 24 * HOUR
+  noteNudge('private:100', yesterday)
+  noteNudge('private:100', yesterday + 60 * 1000)
+  noteNudge('private:100', NOW)
+  flushPersist()
+
+  const dump = JSON.parse(readFileSync(TMP, 'utf8'))
+  const findEntry = (node) => {
+    if (node === null || typeof node !== 'object') return null
+    if (Object.prototype.hasOwnProperty.call(node, 'countToday')) return node
+    for (const value of Object.values(node)) {
+      const hit = findEntry(value)
+      if (hit !== null) return hit
+    }
+    return null
+  }
+  const entry = findEntry(dump)
+  ok(entry !== null, '跨天计数：状态文件里能找到记录')
+  ok(entry !== null && entry.day === dayKey(NOW), '跨天计数：day 已更新为今天')
+  ok(entry !== null && entry.countToday === 1, '跨天计数：昨天 2 次不计入今天，今天从 1 开始')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
