@@ -81,6 +81,10 @@ try {
     calls.push(payload)
     if (failNext > 0) {
       failNext -= 1
+      // 模拟协议端彻底拒发（任何段都不收）
+      if (failMode === 'all') {
+        return { ok: true, json: async () => ({ status: 'failed', retcode: 100, wording: 'boom' }) }
+      }
       // 模拟协议端因为引用段拒发
       if (failMode === 'reply') {
         const hasReply = (payload.params?.message ?? []).some((s) => s.type === 'reply')
@@ -141,6 +145,23 @@ try {
   eq(calls[1].params.message.find((s) => s.type === 'text')?.data?.text, '这句很重要', '重发时正文完整保留')
   ok(r !== null && r !== undefined, '最终仍然返回结果（没抛错）')
 
+  // 0.15.1：降级链全军覆没时必须**抛错**。
+  // 原来只 note 不抛，result 留 null，一路走到 `return result ?? {}`，
+  // qq_send 就把 message_id: 0 当成功报回去 —— 静默丢消息 + 假成功。
+  console.log('\n降级全失败时不许假成功：')
+  calls.length = 0
+  failNext = 10
+  failMode = 'all'
+  let threw = false
+  try {
+    await sendToQQ({ kind: 'group', id: '685694947' }, '这条根本发不出去', { replyTo: '-999' })
+  } catch {
+    threw = true
+  }
+  ok(threw, '逐级降级都失败 → 抛错（调用方能知道没发出去）')
+  failNext = 0
+  failMode = ''
+
   // ---- 4. 投递正文里的锚点（源码级接线断言）----
   // 正文格式是纯函数拼的，但它藏在 handlePrivateMessages / handleGroupMessage 内部，
   // 直接调要起一整套 ctx。这里用「源码必须包含这些片段」守住接线，跟 merge-sim 一个思路。
@@ -153,9 +174,21 @@ try {
   ok(/\$\{refOf\(item\)\}\$\{nameOfSender/.test(pollSrc), '群上下文：每条也带锚点')
   ok(/→ #\$\{quoted\.id\}/.test(pollSrc), '群上下文：引用了别人的消息时标出 → #id')
   // message_id 为 0 是无效 id（协议端规定 message_id 非零）
-  ok(/id === 0\) return ''/.test(pollSrc), 'refOf 把 id=0 当作无效（不产出空锚点）')
+  // 0.15.1：改成**真的调一遍 refOf**（它已导出）。原来是源码字符串断言
+  // `/id === 0\) return ''/`，实现一改写法测试就假红/假绿，守不住行为。
+  const { refOf } = await import('../lib/poll.js')
+  eq(refOf({ message_id: '0' }), '', 'refOf 把 id=0 当作无效')
+  eq(refOf({ message_id: 0 }), '', 'refOf 把数字 0 当作无效')
+  eq(refOf({ message_id: undefined }), '', 'refOf 没有 id → 空串')
+  eq(refOf({ message_id: 'abc' }), '', 'refOf 非数字 → 空串（不产出非法段）')
+  eq(refOf({ message_id: '-1019027093' }), '[#-1019027093]', 'refOf 负数 id 原样保留')
+  // 2^53+1：Number 往返会变成 9007199254740992，锚点就指错消息了
+  eq(refOf({ message_id: '9007199254740993' }), '[#9007199254740993]', 'refOf 超大 id 不丢精度（不 Number 往返）')
   // 自动转发要带 replyTo
   ok(/replyTo\b/.test(pollSrc), 'poll.js 把 replyTo 传给了 deliver')
+  // 0.15.1 回归：锚点前缀让 startsWith('群友') 恒假，身份加固提示会整段消失
+  ok(/line\.includes\('群友'\)/.test(pollSrc), '群聊身份提示用 includes 判断（锚点在前也不失效）')
+  ok(!/line\.startsWith\('群友'\)/.test(pollSrc), '没有人再用 startsWith(\'群友\') 判身份')
 
   const outSrc = readFileSync(new URL('../lib/outbound.js', import.meta.url), 'utf8')
   ok(/replyTo: String\(options\?\.replyTo/.test(outSrc), 'enqueueOutbound 存了 replyTo')

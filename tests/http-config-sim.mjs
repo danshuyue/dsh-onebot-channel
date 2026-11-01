@@ -34,7 +34,10 @@ ok(!/^\s+token:/m.test(publicBlock), 'state 不暴露 token 明文')
 // ---- 2. 保存：地址校验 + 留空不覆盖 ----
 const saveBlock = apiSrc.slice(apiSrc.indexOf("route === '/save'"), apiSrc.indexOf("route === '/detect-ws'"))
 ok(saveBlock.includes('onebotHttp'), '/save 接受 onebotHttp')
-ok(/\^https\?:\\\/\\\//.test(saveBlock), '/save 校验地址必须以 http(s):// 开头')
+// 0.15.1：不再只看前缀（`http://` 也能过），改用 new URL() 真解析协议 / 主机 / 端口
+ok(/new URL\(/.test(saveBlock), '/save 用 new URL() 解析地址（不只看前缀）')
+ok(/protocol !== 'http:'/.test(saveBlock), '/save 拒绝非 http(s) 协议')
+ok(/65535/.test(saveBlock), '/save 校验端口范围')
 ok(saveBlock.includes('400'), '非法地址返回 400 而不是照写')
 ok(/body\.token\.trim\(\) !== ''/.test(saveBlock), 'token 留空 = 保持原样（不覆盖已有凭据）')
 ok(/body\.onebotHttp\.trim\(\) !== ''/.test(saveBlock), '地址留空 = 保持原样')
