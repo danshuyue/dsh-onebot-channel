@@ -111,6 +111,7 @@ const DELIBERATE = {
   allowSendToAny: '安全逃生阀，故意只留配置文件',
   wsToken: '凭据，留空即保持原样',
   enabled: '总开关只在加载时读一次，给按钮会误导成即时生效',
+  waterWindows: '活动时段复用水群配置，本版本不在六项窗口控件中编辑',
   workspaceCwd: '由会话列表决定，界面只显示',
 }
 const uncovered = defaultKeys

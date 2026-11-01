@@ -136,7 +136,9 @@ ok(created.length > createdBefore, '断线后自动重连了')
   })
   ok(normalized.sender.user_id === '1742196292', 'sender.user_id 归一化了')
   ok(Array.isArray(normalized.message) && normalized.message.length === 2, '段数组原样保留')
-  ok(normalized.message_id === -777, 'message_id 保留（负数也没关系）')
+  ok(normalized.message_id === '-777', 'message_id 保留为无损字符串（负数也没关系）')
+  const huge = normalizeEvent({ message_id: '900719925474099312345' })
+  ok(huge.message_id === '900719925474099312345', '大 message_id 超过 Number 安全范围仍原样保留')
 }
 
 stop()

@@ -15,7 +15,7 @@ QQ 客户端
    ↓  本插件：WS 事件推送为主，HTTP 轮询兜底
 路由表：这个 QQ 号 / 群绑的是哪个会话
    ↓  agent.followup()  唤醒会话
-会话跑一个回合（agent 看到「（2026-11-01 12:09）（QQ 私聊·用户本人 QQ …）…」）
+会话跑一个回合（agent 看到「（QQ 私聊·用户本人 QQ …）…」）
    ↓  agent 调 qq_send 工具
 OneBot send_private_msg / send_group_msg
    ↓  按换行切条（她自己写几行就几条），带随机延时
@@ -37,20 +37,21 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 10 个工具：
+装好之后 agent 有 11 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
 | `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at` | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` |
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
 | `qq_msg_history` | 查群 / 好友历史消息（**返回的图能看见**，0.12.0） | `group_id` `user_id` `count` `before_message_id` |
-| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
+| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
 | `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
 | `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
 | `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
+| `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -70,7 +71,10 @@ dsh plugin --profile desktop add dsh-onebot-channel
 { "index": 1 }
 
 // 收藏表情包
-{ "index": 1, "desc": "猫脑过载" }
+{ "message_id": "-313561868" }                    // 直接收某条消息里的那张（最省事）
+{ "message_id": "-313561868", "image": 1, "desc": "猫脑过载" }
+{ "index": 1, "desc": "猫脑过载" }                // 或按「收到的图片」目录序号
+{ "recent": 1, "desc": "猫脑过载" }               // 或最近收到的那张
 
 // 发说说（对外发布）
 { "content": "今天天气不错", "visibility": 1 }
@@ -95,6 +99,62 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 `qq_close` 有硬约束：如果对方还有提问没回答，桥接会拒绝收摊，逼模型先把话接完再走。`qq_close` 写下的「下次怎么接」会在下次开场时自动带回，避免冷启动尬聊。
 
 更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
+
+### 戳一戳（0.16.5）
+
+QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插件对它完全没有反应 ——
+根因不是「没实现回戳」，而是**入站根本没接**：
+
+`handleWsEvent` 开头是 `if (event?.post_type !== 'message') return`，而戳一戳是
+`post_type: 'notice'` 事件。于是所有 notice 在那一行被无条件丢掉。
+现场证据：线上 WS 收到 115 个事件、其中 29 条是消息 —— 剩下 86 个全被吞掉，
+日志里 `grep notice` 计数是 **0**。
+
+现在两头都通了：
+
+| 方向 | 行为 |
+|---|---|
+| 别人戳她 | 起一轮，正文里写明「谁戳了谁 + 是用户本人还是群友」；同一处 10 秒内连戳只回一次（`pokeCooldownMs`） |
+| 群友互戳（没戳她） | 只记日志，不唤醒她 |
+| 她自己发起的戳 / 戳自己 | 忽略（防自问自答） |
+| 她主动戳人 | `qq_poke` 工具，走 `group_poke` / `friend_poke` |
+
+⚠️ **两种事件形状的 `user_id` 语义不一样**，这是真机抓包才发现的坑：
+
+```
+群戳：  { group_id, user_id:<戳人者>,   target_id:<被戳者> }
+私聊戳：{ user_id:<会话对端>, sender_id:<戳人者>, target_id:<被戳者> }
+```
+
+私聊戳的 `user_id` **不是**戳人者（SnowLuma 内部是 `peerUin`）。照抄 NapCat 文档
+直接读 `user_id` 会把「谁戳的」认错。统一判据是 `target_id === self_id`，
+两种形状下都成立。`tests/poke-sim.mjs` 里专门锁了这条。
+
+### 收藏表情包：GIF 原样保留（0.16.4）
+
+群友发的表情包大多是真动图。以前「收进收藏夹」这条路有两个问题叠在一起：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 传的是 `file://` | 协议端读的是**它自己那台机器**的盘。协议端跑在别的机器 / VM 上时，每次都 `ENOENT` —— 不是 GIF 收不进去，是**什么图都收不进去** | 一律改走 `base64://`，把字节塞进请求体，跟两边文件系统解耦 |
+| 只能从「收到的图片」目录取源 | 群友刚发的表情包还没落进目录，手上只有正文里的 `[#消息编号]` | 新增 `message_id`（+`image=N`）：`get_msg` → 下载 → 收藏，不用等缓存 |
+
+实测（SnowLuma 2.2.1，跨机）：1 077 407 字节、**202 帧**的 GIF 经 `base64://` 收进收藏夹，
+从 `p.qpic.cn` 取回来仍是 `image/gif`、1077407 字节、MD5 与本地文件**完全一致** —— **每一帧都在，动画没丢**。
+
+> 帧数这里踩过一个坑，记一下：最初用「裸扫 `0x21 0xF9`」数帧，得到 213，比真实的 202 多 11 个 ——
+> 多出来的全落在 LZW 压缩数据子块里（那是偶然出现的字节序列，不是帧边界）。
+> 现在 `gifFrameCount()` 走 GIF 块结构遍历（遇扩展块读子块链、遇图像描述符才 +1），
+> 实测 202 正确。**这个错误一度被当成验收结论写进 README，所以留痕。**
+
+体积上限 8 MB（`images.js:IMAGE_MAX_BYTES`）：base64 会把请求体放大 4/3，
+超限直接报错，比拖到超时好排查。
+
+### @ 之后继续聊（0.16.3）
+
+群里 @ 她后默认开启限时对话窗口：触发者的后续消息、任何人的 @，以及引用她窗口内回复的消息可继续进入对话；普通群聊仍会跳过。窗口消息按批次处理，空闲超时、时长上限、回复数或预算到达后自动关闭。设置位于「对话节奏」，可配置开关、静默时间、单窗回复数及每日开窗额度。
+
+活动时段默认 `12:00-14:00`、`18:00-09:00`，跨午夜有效；时段外仍照常回复直接 @，但不打开连续对话窗口。
 
 ### @ 人（0.14.0）
 
@@ -216,8 +276,6 @@ reply + at + text   ← 原样
 | 当日配额 | 1 次 | `proactiveDailyMax` |
 | 没被回应的退避 | 2ⁿ 倍，封顶 4 倍 | `proactiveBackoffMax` |
 
-> 配额按**自然日**算：跨过零点，昨天的次数不再计入，设置页的「今天几次」也随之归零（0.11.1 修；之前的版本只更新日期不清计数，数字会一直涨）。
-
 关键点：这一层**不自己写文案**。它只是往同一个会话里投一条内部来信：
 
 ```
@@ -259,12 +317,11 @@ reply + at + text   ← 原样
 | 群聊带上下文 | 被 @ 时附带上次投递之后的未读群消息 |
 | 发表情 | 正文写 `[表情:呲牙]`，或 `qq_send` 带 `emoji` |
 | 商城大表情 | `qq_send` 带 `custom_emoji`（需先收藏进账号收藏夹） |
-| 图片理解 | QQ 图片下载后进 DSH 附件库，作为 image 块投进会话 —— **模型真能看见图**。三条路都通：入站投递、群 @ 的上下文、`qq_msg_history` 翻历史（后两条 0.12.0 补，该工具目前默认关闭） |
-| 正文带时间 | 每条投进去的消息前面带「（2026-11-01 12:09）」，取的是**消息自身的时间**（不是轮询到的时刻），隔了几小时才看到也判断得出来 |
+| 图片理解 | QQ 图片下载后进 DSH 附件库，作为 image 块投进会话 —— **模型真能看见图**。三条路都通：入站投递、群 @ 的上下文、`qq_msg_history` 翻历史（后两条 0.12.0 补） |
 | 分条由她决定 | **正文换行 = 另起一条**（`splitMode: paragraph`，0.10.0 默认）；想回「一句一条」切成 `sentence`。带随机延时，模型也能用 `segments` 直接指定 |
 | 连发合并 | 私聊连发几条先攒一会儿再一起回（`mergeWindowMs`，0 = 关），不再被连问三遍 |
-| 主动搭话 | 没人叫她时自己想起来找你（默认关，四道闸 + 退避；可选只对指定的人开口；设置页可「现在试一次」/「对TA试一次」；「今天几次」按自然日，跨天自动清零） |
-| 设置页 UI | 设置 → **QQ 桥接**：顶部一排功能分区（概览 / 绑定 / 对话节奏 / 主动搭话 / 关系记忆 / 推送 / 高级），点进去只看那一块 |
+| 主动搭话 | 没人叫她时自己想起来找你（默认关，四道闸 + 退避；可选只对指定的人开口；设置页可「现在试一次」/「对TA试一次」） |
+| 设置页 UI | 设置 → **QQ 桥接**：顶部一排功能分区（概览 / 绑定 / 对话节奏 / 主动搭话 / 关系记忆 / 配置 / 高级），点进去只看那一块 |
 
 ### 设置页能调什么
 
@@ -274,7 +331,7 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
@@ -440,6 +497,7 @@ reply + at + text   ← 原样
 |---|---|---|
 | GET | `/api/qq-bridge/state` | 配置（不含 token）+ 路由表 + 会话列表 + 好友/群列表 + 机器人信息 |
 | POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置（含 `onebotHttp` / `token`，留空不覆盖） |
+| POST | `/api/qq-bridge/clear-credentials` | 清空 HTTP / WebSocket token（不可撤销） |
 | POST | `/api/qq-bridge/detect-ws` | 自动发现协议端的 WS 接入点 |
 | POST | `/api/qq-bridge/detect-http` | 自动发现协议端的 HTTP 接入点（读 `httpServers`，0.15.0） |
 | POST | `/api/qq-bridge/memory-clear` | 清空整张关系卡表（不可撤销，设置页里有二次确认） |
@@ -546,16 +604,16 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-39 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+41 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
-| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
+| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
-| 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） |
+| 能力与 UI | `tool.js`（11 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
 各模块的详细职责和踩坑见 [docs/开发笔记.md](docs/开发笔记.md)。
@@ -594,7 +652,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 10 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 11 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
@@ -620,4 +678,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-31 · v0.15.0*
+*最后更新：2026-11-02 · v0.16.5*
