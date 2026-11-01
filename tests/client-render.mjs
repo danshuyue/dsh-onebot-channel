@@ -241,10 +241,20 @@ ok(proactive.includes('静默开始'), '闸门参数还在')
 const allModeTree = section.type(Object.assign({}, section.props))
 ok(allModeTree !== null, '全员模式渲染不炸')
 
-// ---- 5. 记忆 / 推送 / 高级：三块都能单独打开 ----
+// ---- 5. 记忆 / 配置 / 高级：三块都能单独打开 ----
 ok(paint('memory').includes('关系记忆'), '记忆页能打开')
-ok(paint('ws').includes('WebSocket') || paint('ws').includes('推送地址'), '推送页能打开')
+ok(paint('ws').includes('WebSocket') || paint('ws').includes('推送地址'), '配置页能打开')
 ok(paint('advanced').includes('高级设置'), '高级页能打开')
+
+// ---- 5b. 「配置」分区：HTTP API 与 WS 两条链路都在（0.15.0） ----
+const configPane = paint('ws')
+ok(configPane.includes('HTTP API'), '配置页有 HTTP API 区块')
+ok(configPane.includes('HTTP 地址'), '配置页能改 HTTP 地址')
+ok(configPane.includes('HTTP token'), '配置页能改 HTTP token')
+ok(configPane.includes('httpServers'), '提示里说明 token 在 httpServers 里（与 WS 那套区分）')
+ok(configPane.includes('WebSocket 推送'), '同一页里还有 WS 推送区块')
+ok(configPane.includes('WS 地址') && configPane.includes('WS token'), 'WS 地址与 token 也都还在')
+ok(configPane.includes('自动发现'), 'HTTP 也有自动发现按钮')
 
 // ---- 6. 模拟 cordis 的门禁：读 ctx.sessions 直接抛 ----
 // "cannot get property sessions without inject"。组件必须照样渲染（降级成宿主端那份列表）。

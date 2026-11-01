@@ -94,7 +94,6 @@ ok(notRendered.length === 0, `可写字段都渲染出了控件${notRendered.len
 // ---- 7. 刻意不给控件的字段：必须写在白名单里，别静默漏掉 --------------------
 const DELIBERATE = {
   routes: '路由表由绑定表格接管',
-  onebotHttp: '协议端地址，属于装机配置，改错会直接断链',
   token: '凭据，前端不回显也不该可写',
   selfUin: '登录后由 OneBot 报回',
   peerUin: '私聊对象，由路由表取代',
@@ -146,6 +145,12 @@ ok(/var TABS = \[/.test(clientSrc), '设置页有功能分区表（TABS）')
 for (const id of ['overview', 'binding', 'stance', 'proactive', 'memory', 'ws', 'advanced']) {
   ok(new RegExp(`\\['${id}'`).test(clientSrc), `分区表里有「${id}」`)
 }
+// 0.15.0：「推送」改名「配置」，HTTP API 也进了这一页
+ok(clientSrc.includes("['ws', '配置']"), '「推送」分区已改名「配置」')
+ok(clientSrc.includes('HTTP API'), '配置页有 HTTP API 区块')
+ok(clientSrc.includes('onebotHttp'), '配置页能改 HTTP 地址')
+ok(apiSrc.includes("'/detect-http'"), '后端有 HTTP 自动发现路由')
+ok(apiSrc.includes('discoverHttpEndpoint'), '自动发现能读 httpServers')
 ok(clientSrc.includes("className: 'qqb-tabs'"), '顶部真的渲染出分区条')
 // 一次只挂一块：主 return 里不应再直接铺 renderTable / renderStance 等
 ok(clientSrc.includes("tab === 'binding'"), '切分区时按 tab 决定渲染哪一块')

@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "QQ 桥接",
+    "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：消息推送入站唤醒会话，模型可用 qq_send 等工具回话（支持引用、@、分条、表情、图片），并能查历史、发表情包、发 QQ 空间说说。"
+  }
+}

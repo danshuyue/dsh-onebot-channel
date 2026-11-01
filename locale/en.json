@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "QQ Bridge",
+    "description": "Connects QQ private chats and group chats into DeepSeek Harness over OneBot 11: incoming messages wake a session, and the model replies with tools such as qq_send (quotes, @-mentions, message splitting, emoji and images), plus history search, sticker collection and QZone posts."
+  }
+}

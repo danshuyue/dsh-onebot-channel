@@ -7,12 +7,36 @@
  *
  * 全程用临时文件，不碰 ~/.dsh/qq-bridge-memory.json。
  */
-import { writeFileSync, rmSync, existsSync } from 'node:fs'
+import { writeFileSync, rmSync, existsSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { remember, touchPeer, describeMemory, loadMemory, useMemoryFile, flushPersist } from '../lib/memory.js'
 
-const TMP = join(tmpdir(), `qq-memory-test-${process.pid}.json`)
+/**
+ * 临时文件位置：优先 %TEMP%，不行就退到插件目录之外的工作区。
+ *
+ * 为什么要退：有的机器上 %TEMP% 带拒绝项（实测这台就是），
+ * 子进程在 os.tmpdir() 里写文件会被 EPERM 挡住 ——
+ * 那是环境问题，不该让一个纯逻辑测试报红，更不该让人误以为是记忆卡坏了。
+ */
+function scratchDir() {
+  const candidates = [tmpdir(), join(dirname(fileURLToPath(import.meta.url)), '..', '..', '.tmp-test')]
+  for (const dir of candidates) {
+    try {
+      mkdirSync(dir, { recursive: true })
+      const probe = join(dir, `.probe-${process.pid}`)
+      writeFileSync(probe, 'x')
+      rmSync(probe, { force: true })
+      return dir
+    } catch {
+      /* 换下一个 */
+    }
+  }
+  return tmpdir()
+}
+
+const TMP = join(scratchDir(), `qq-memory-test-${process.pid}.json`)
 useMemoryFile(TMP)
 rmSync(TMP, { force: true })
 
