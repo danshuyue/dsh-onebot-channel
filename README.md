@@ -139,8 +139,13 @@ QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插�
 | 传的是 `file://` | 协议端读的是**它自己那台机器**的盘。协议端跑在别的机器 / VM 上时，每次都 `ENOENT` —— 不是 GIF 收不进去，是**什么图都收不进去** | 一律改走 `base64://`，把字节塞进请求体，跟两边文件系统解耦 |
 | 只能从「收到的图片」目录取源 | 群友刚发的表情包还没落进目录，手上只有正文里的 `[#消息编号]` | 新增 `message_id`（+`image=N`）：`get_msg` → 下载 → 收藏，不用等缓存 |
 
-实测（SnowLuma 2.2.1，跨机）：1 077 407 字节、**213 帧**的 GIF 经 `base64://` 收进收藏夹，
-从 `p.qpic.cn` 取回来仍是 `image/gif`、1077407 字节、213 个 GCE 块 —— **每一帧都在，动画没丢**。
+实测（SnowLuma 2.2.1，跨机）：1 077 407 字节、**202 帧**的 GIF 经 `base64://` 收进收藏夹，
+从 `p.qpic.cn` 取回来仍是 `image/gif`、1077407 字节、MD5 与本地文件**完全一致** —— **每一帧都在，动画没丢**。
+
+> 帧数这里踩过一个坑，记一下：最初用「裸扫 `0x21 0xF9`」数帧，得到 213，比真实的 202 多 11 个 ——
+> 多出来的全落在 LZW 压缩数据子块里（那是偶然出现的字节序列，不是帧边界）。
+> 现在 `gifFrameCount()` 走 GIF 块结构遍历（遇扩展块读子块链、遇图像描述符才 +1），
+> 实测 202 正确。**这个错误一度被当成验收结论写进 README，所以留痕。**
 
 体积上限 8 MB（`images.js:IMAGE_MAX_BYTES`）：base64 会把请求体放大 4/3，
 超限直接报错，比拖到超时好排查。
@@ -326,7 +331,7 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`。
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |

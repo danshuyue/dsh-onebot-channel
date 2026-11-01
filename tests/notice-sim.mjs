@@ -214,5 +214,100 @@ console.log('冷却：')
 }
 resetPokeCooldown()
 
+// ---- 5. 并发两条戳：只能回一次 ----
+
+console.log('并发（handleWsEvent 是 fire-and-forget 调起的）：')
+{
+  resetPokeCooldown()
+  delivered.length = 0
+  config.pokeCooldownMs = 60000
+  // 不 await —— 模拟 WS 连收两条时两边同时在飞
+  const a = handleWsEvent(fakeCtx, groupPokeAtMe())
+  const b = handleWsEvent(fakeCtx, groupPokeAtMe())
+  await Promise.all([a, b])
+  ok(delivered.length <= 1, `两条并发戳最多回一次（实际投递 ${delivered.length} 次）`)
+  config.pokeCooldownMs = 0
+}
+resetPokeCooldown()
+
+// ---- 7. 私聊戳端到端（群戳测过，私聊戳不能只停在纯函数层） ----
+
+console.log('私聊戳：')
+{
+  resetPokeCooldown()
+  delivered.length = 0
+  config.pokeCooldownMs = 0
+  config.routes = { private: { [MEMBER]: { sessionId: 'session-fake-private' } }, group: {} }
+  await handleWsEvent(fakeCtx, {
+    time: Math.floor(Date.now() / 1000),
+    self_id: Number(SELF),
+    post_type: 'notice',
+    notice_type: 'notify',
+    sub_type: 'poke',
+    user_id: Number(MEMBER),      // 会话对端
+    sender_id: Number(MEMBER),    // 戳人者
+    target_id: Number(SELF),
+    action: '戳了戳'
+  })
+  eq(delivered.length, 1, '好友私聊戳我 → 投递一次')
+  const body = extractText(delivered[0])
+  // 私聊里不能叫「群友」—— 那是群聊措辞，会让她以为在群里说话
+  ok(!body.includes('群友'), `私聊戳的正文不说「群友」（实际：${body.slice(0, 60)}）`)
+  ok(body.includes('好友') || body.includes('用户本人'), '私聊戳用「好友 / 用户本人」的身份措辞')
+  ok(body.includes('戳了戳你'), `私聊戳也写成「戳了戳你」而不是裸 QQ 号（实际：${body.slice(0, 60)}）`)
+  config.routes = { private: {}, group: { 975663147: { sessionId: 'session-fake-group' } } }
+}
+
+// ---- 8. selfUin=0 时的真实路径（默认配置就长这样，不能只测「配好了」） ----
+
+console.log('默认配置（selfUin=0）也要能用：')
+{
+  resetPokeCooldown()
+  delivered.length = 0
+  config.pokeCooldownMs = 0
+  const saved = config.selfUin
+  config.selfUin = 0   // 新装用户就是这个值
+  // 事件自带 self_id → 必须正常工作（这是 poke.js 优先取 self_id 的意义）
+  await handleWsEvent(fakeCtx, groupPokeAtMe())
+  eq(delivered.length, 1, 'selfUin=0 但事件带 self_id → 仍能投递（不静默失效）')
+  config.selfUin = saved
+}
+
+// ---- 9. 投递失败要能重试 ----
+
+console.log('投递失败要能重试：')
+{
+  resetPokeCooldown()
+  delivered.length = 0
+  config.pokeCooldownMs = 60000
+  // ⚠️ 特意不提供 get/resume 可用的 agents：
+  //    deliver 的语义是「followup 抛错 → 内部记一条 note 后照样 return sessionId」
+  //    （它认为「已入队就算投出去了」，不是我们能改的约定）。
+  //    真正的「没投出去」只有一种：**拿不到 agent** → 返回空串。
+  //    所以这里模拟「会话已归档 / agent 拉不起来」这个真实会发生的场景。
+  const failCtx = {
+    get(name) {
+      if (name === 'agents') {
+        return { get: () => undefined, resume: undefined }
+      }
+      if (name === 'llm') return { createUserMessage: () => ({ role: 'user', content: [], id: 'm' }) }
+      return undefined
+    }
+  }
+  const { invalidateArchiveCache } = await import('../lib/archive.js')
+  invalidateArchiveCache()
+  await handleWsEvent(failCtx, groupPokeAtMe())
+  eq(delivered.length, 0, '拿不到 agent → 没进会话')
+  // 冷却必须被撤掉，否则这一戳会把接下来的正常戳一起吞掉
+  const { pokeCooldownRemaining, parsePoke } = await import('../lib/poke.js')
+  const p = parsePoke(groupPokeAtMe(), SELF)
+  eq(pokeCooldownRemaining(p, config), 0, '投递失败后冷却已撤回（下一戳能重试）')
+  // 再戳一次应当能成功投递
+  await handleWsEvent(fakeCtx, groupPokeAtMe())
+  eq(delivered.length, 1, '失败后的下一戳能正常投递')
+  config.pokeCooldownMs = 0
+}
+resetPokeCooldown()
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed > 0 ? 1 : 0)

@@ -13,7 +13,7 @@
  *   私聊戳 —— user_id 是**会话对端**，戳人者在 sender_id 里
  * 照抄 NapCat 文档直接读 user_id 会把「谁戳的」认错，所以这两个用例必须都在。
  */
-import { isPokeEvent, parsePoke, shouldReact, sendPoke, pokeCooldownRemaining, markPokeReacted, resetPokeCooldown } from '../lib/poke.js'
+import { isPokeEvent, parsePoke, shouldReact, sendPoke, pokeCooldownRemaining, markPokeReacted, claimPokeCooldown, releasePokeCooldown, resetPokeCooldown } from '../lib/poke.js'
 
 let passed = 0
 let failed = 0
@@ -133,6 +133,32 @@ console.log('parsePoke：')
   eq(parsePoke({ post_type: 'message' }, SELF), null, '不是戳事件返回 null')
 }
 
+// ---- 2b. self_id 优先于 config.selfUin（审核发现的静默失效） ----
+
+console.log('认「我是谁」：')
+{
+  // ⭐ 这条是这轮审核最重要的回归：config.selfUin 默认 0，String(0) = '0'，
+  //    以前拿它跟 target_id 比永远不成立 → 所有戳被静默判成 not-for-me。
+  //    事件自带 self_id，必须优先用它。
+  const ev = { ...GROUP_POKE, user_id: MEMBER, target_id: 3566906627 }
+  const p = parsePoke(ev, 0)
+  eq(p.selfKnown, true, 'config.selfUin=0 时，靠事件 self_id 仍能认出本号')
+  eq(p.targetsSelf, true, 'config.selfUin=0 时，仍能判定「戳的是我」')
+}
+{
+  // 两处都没有：要明确报 self-unknown，而不是静默 not-for-me
+  const ev = { post_type: 'notice', notice_type: 'notify', sub_type: 'poke', user_id: MEMBER, target_id: 3566906627 }
+  const p = parsePoke(ev, 0)
+  eq(p.selfKnown, false, '事件没 self_id、配置也是 0 → selfKnown=false')
+  eq(shouldReact(p, { pokeEnabled: true }).reason, 'self-unknown', '原因要报 self-unknown（可操作），不是 not-for-me')
+}
+{
+  // 配置里的 selfUin 与事件的 self_id 冲突时，以事件为准（配置可能过期）
+  const ev = { ...GROUP_POKE, self_id: 3566906627, user_id: MEMBER, target_id: 3566906627 }
+  const p = parsePoke(ev, 999999999)
+  eq(p.targetsSelf, true, 'self_id 与 config 冲突时以事件为准')
+}
+
 // ---- 3. 该不该接话 ----
 
 console.log('shouldReact：')
@@ -182,6 +208,20 @@ console.log('冷却：')
   ok(pokeCooldownRemaining(toA, { pokeCooldownMs: 10000 }) > 0, '私聊戳 A → A 冷却')
   eq(pokeCooldownRemaining(toB, { pokeCooldownMs: 10000 }), 0, '私聊戳 B 不受 A 影响')
 }
+{
+  // ⭐ 并发竞态：handleWsEvent 是 fire-and-forget 调起的，两条戳会同时跑到冷却检查。
+  //    「查 → 投递 → 再记时间」的顺序下，两边都会看到没冷却 → 双投递。
+  //    改成「先占位」之后，第二次必须立刻看到冷却。
+  resetPokeCooldown()
+  const poke = parsePoke({ ...GROUP_POKE, user_id: MEMBER, target_id: 3566906627 }, SELF)
+  const cfg = { pokeCooldownMs: 10000 }
+  eq(pokeCooldownRemaining(poke, cfg), 0, '并发前：没有冷却')
+  claimPokeCooldown(poke)   // 第一个事件占位
+  ok(pokeCooldownRemaining(poke, cfg) > 0, '第二个并发事件立刻看到冷却（先占位才挡得住）')
+  // 投递失败要能撤回，否则这一戳会把后续正常戳一起吞掉
+  releasePokeCooldown(poke)
+  eq(pokeCooldownRemaining(poke, cfg), 0, '投递失败撤掉占位 → 冷却归零，可以重试')
+}
 resetPokeCooldown()
 
 // ---- 5. 出站 ----
@@ -221,6 +261,45 @@ console.log('sendPoke：')
   // 协议端拒绝时要把原因带回来，不能静默当成功
   globalThis.fetch = async () => ({ ok: true, json: async () => ({ retcode: 100, wording: '频率限制' }) })
   await throws(async () => sendPoke({ userUin: OWNER, groupId: '', selfUin: SELF }), 'retcode 非 0 → 抛错')
+}
+
+// ---- 6. 白名单：群戳不许戳群里的任何人 ----
+
+console.log('白名单（拍一拍的目标必须是服务对象）：')
+{
+  // ⚠️ 这一段是这轮审核的关键回归。之前 poke-sim 只 loadConfig()，
+  //    隔离 HOME 下白名单**是空的** → assertSendAllowed 走「完全没配置时放行」
+  //    那条边界 → 任何目标都放行 → 「白名单断言」其实什么都没测。
+  //    所以这里先把白名单配起来，再验群戳的目标号真的受管。
+  const { getConfig } = await import('../lib/config.js')
+  const { allowedPokeTargets } = await import('../lib/allowlist.js')
+  const cfg = getConfig()
+  cfg.allowSendToAny = false
+  cfg.ownerUin = OWNER
+  cfg.peerUin = OWNER
+  cfg.routes = { private: { [OWNER]: { sessionId: 'x' } }, group: { 975663147: {} } }
+  cfg.groupUins = ['975663147']
+  ok(allowedPokeTargets().has(OWNER), '用户本人在「可戳」集合里')
+  ok(!allowedPokeTargets().has('555555555'), '没绑定的群友不在「可戳」集合里')
+
+  globalThis.fetch = async () => ({ ok: true, json: async () => ({ retcode: 0, data: null }) })
+  // 戳已绑定的用户：放行
+  const okResult = await sendPoke({ userUin: OWNER, groupId: '975663147', selfUin: SELF })
+  eq(okResult.userUin, OWNER, '群戳用户本人 → 放行')
+  // 戳群里的陌生人：必须被拦（这是审核发现的安全缺口）
+  await throws(
+    async () => sendPoke({ userUin: '555555555', groupId: '975663147', selfUin: SELF }),
+    '群戳未绑定的群友 → 被白名单拦（以前是直接放行）'
+  )
+  await throws(
+    async () => sendPoke({ userUin: '999999999', groupId: '975663147', selfUin: SELF }),
+    '群戳任意号码 → 被白名单拦'
+  )
+  // group_id 形状不合法：要在本地就拒，不能带着 NaN/null 发出去
+  await throws(
+    async () => sendPoke({ userUin: OWNER, groupId: '不是群号', selfUin: SELF }),
+    'group_id 不是数字 → 本地就拒（以前会带 group_id:null 发 group_poke）'
+  )
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
