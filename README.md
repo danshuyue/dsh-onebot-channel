@@ -96,6 +96,12 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 
 更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
 
+### @ 之后继续聊（0.16.1）
+
+群里 @ 她后默认开启限时对话窗口：触发者的后续消息、任何人的 @，以及引用她窗口内回复的消息可继续进入对话；普通群聊仍会跳过。窗口消息按批次处理，空闲超时、时长上限、回复数或预算到达后自动关闭。设置位于「对话节奏」，可配置开关、静默时间、单窗回复数及每日开窗额度。
+
+活动时段默认 `12:00-14:00`、`18:00-09:00`，跨午夜有效；时段外仍照常回复直接 @，但不打开连续对话窗口。
+
 ### @ 人（0.14.0）
 
 群里回话时点名叫人。跟引用一样，**@ 只挂在第一条消息上** —— 分条发送时后面几条不带 @，
@@ -261,7 +267,7 @@ reply + at + text   ← 原样
 | 分条由她决定 | **正文换行 = 另起一条**（`splitMode: paragraph`，0.10.0 默认）；想回「一句一条」切成 `sentence`。带随机延时，模型也能用 `segments` 直接指定 |
 | 连发合并 | 私聊连发几条先攒一会儿再一起回（`mergeWindowMs`，0 = 关），不再被连问三遍 |
 | 主动搭话 | 没人叫她时自己想起来找你（默认关，四道闸 + 退避；可选只对指定的人开口；设置页可「现在试一次」/「对TA试一次」） |
-| 设置页 UI | 设置 → **QQ 桥接**：顶部一排功能分区（概览 / 绑定 / 对话节奏 / 主动搭话 / 关系记忆 / 推送 / 高级），点进去只看那一块 |
+| 设置页 UI | 设置 → **QQ 桥接**：顶部一排功能分区（概览 / 绑定 / 对话节奏 / 主动搭话 / 关系记忆 / 配置 / 高级），点进去只看那一块 |
 
 ### 设置页能调什么
 
@@ -271,7 +277,7 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`。
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
@@ -437,6 +443,7 @@ reply + at + text   ← 原样
 |---|---|---|
 | GET | `/api/qq-bridge/state` | 配置（不含 token）+ 路由表 + 会话列表 + 好友/群列表 + 机器人信息 |
 | POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置（含 `onebotHttp` / `token`，留空不覆盖） |
+| POST | `/api/qq-bridge/clear-credentials` | 清空 HTTP / WebSocket token（不可撤销） |
 | POST | `/api/qq-bridge/detect-ws` | 自动发现协议端的 WS 接入点 |
 | POST | `/api/qq-bridge/detect-http` | 自动发现协议端的 HTTP 接入点（读 `httpServers`，0.15.0） |
 | POST | `/api/qq-bridge/memory-clear` | 清空整张关系卡表（不可撤销，设置页里有二次确认） |
@@ -543,12 +550,12 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-39 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+40 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
-| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
+| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
 | 能力与 UI | `tool.js`（10 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
@@ -617,4 +624,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-10-31 · v0.15.0*
+*最后更新：2026-11-01 · v0.16.1*

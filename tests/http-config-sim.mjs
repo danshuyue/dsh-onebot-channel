@@ -34,10 +34,13 @@ ok(!/^\s+token:/m.test(publicBlock), 'state 不暴露 token 明文')
 // ---- 2. 保存：地址校验 + 留空不覆盖 ----
 const saveBlock = apiSrc.slice(apiSrc.indexOf("route === '/save'"), apiSrc.indexOf("route === '/detect-ws'"))
 ok(saveBlock.includes('onebotHttp'), '/save 接受 onebotHttp')
-ok(/\^https\?:\\\/\\\//.test(saveBlock), '/save 校验地址必须以 http(s):// 开头')
-ok(saveBlock.includes('400'), '非法地址返回 400 而不是照写')
+ok(saveBlock.includes('new URL'), '地址保存使用 URL 真解析')
+ok(saveBlock.includes('nextHttp'), '地址校验结果先暂存，全部通过后再写入')
+ok(saveBlock.includes('65535'), '端口范围经过校验')
 ok(/body\.token\.trim\(\) !== ''/.test(saveBlock), 'token 留空 = 保持原样（不覆盖已有凭据）')
 ok(/body\.onebotHttp\.trim\(\) !== ''/.test(saveBlock), '地址留空 = 保持原样')
+ok(saveBlock.includes('waterWindows'), '保存入口校验 waterWindows')
+ok(saveBlock.includes('HH:MM-HH:MM'), '非法活动时间段返回明确格式错误')
 
 // ---- 3. 自动发现：读 httpServers ----
 ok(apiSrc.includes("'/detect-http'"), '有 /detect-http 路由')
