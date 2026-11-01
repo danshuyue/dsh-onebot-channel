@@ -44,7 +44,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at` | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` |
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
 | `qq_msg_history` | 查群 / 好友历史消息（**返回的图能看见**，0.12.0） | `group_id` `user_id` `count` `before_message_id` |
-| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹 | `index` `recent` `file` `desc` `dir` `list` `delete` |
+| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
 | `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
@@ -70,7 +70,10 @@ dsh plugin --profile desktop add dsh-onebot-channel
 { "index": 1 }
 
 // 收藏表情包
-{ "index": 1, "desc": "猫脑过载" }
+{ "message_id": "-313561868" }                    // 直接收某条消息里的那张（最省事）
+{ "message_id": "-313561868", "image": 1, "desc": "猫脑过载" }
+{ "index": 1, "desc": "猫脑过载" }                // 或按「收到的图片」目录序号
+{ "recent": 1, "desc": "猫脑过载" }               // 或最近收到的那张
 
 // 发说说（对外发布）
 { "content": "今天天气不错", "visibility": 1 }
@@ -95,6 +98,21 @@ QQ 桥接和真人聊天，最不像的地方是「真人会不回、会晾着�
 `qq_close` 有硬约束：如果对方还有提问没回答，桥接会拒绝收摊，逼模型先把话接完再走。`qq_close` 写下的「下次怎么接」会在下次开场时自动带回，避免冷启动尬聊。
 
 更细的判断逻辑（收尾评分、节奏底座、自动静默）见 [docs/QQ对话说明.md](docs/QQ对话说明.md)。
+
+### 收藏表情包：GIF 原样保留（0.16.4）
+
+群友发的表情包大多是真动图。以前「收进收藏夹」这条路有两个问题叠在一起：
+
+| 问题 | 现象 | 修法 |
+|---|---|---|
+| 传的是 `file://` | 协议端读的是**它自己那台机器**的盘。协议端跑在别的机器 / VM 上时，每次都 `ENOENT` —— 不是 GIF 收不进去，是**什么图都收不进去** | 一律改走 `base64://`，把字节塞进请求体，跟两边文件系统解耦 |
+| 只能从「收到的图片」目录取源 | 群友刚发的表情包还没落进目录，手上只有正文里的 `[#消息编号]` | 新增 `message_id`（+`image=N`）：`get_msg` → 下载 → 收藏，不用等缓存 |
+
+实测（SnowLuma 2.2.1，跨机）：1 077 407 字节、**213 帧**的 GIF 经 `base64://` 收进收藏夹，
+从 `p.qpic.cn` 取回来仍是 `image/gif`、1077407 字节、213 个 GCE 块 —— **每一帧都在，动画没丢**。
+
+体积上限 8 MB（`images.js:IMAGE_MAX_BYTES`）：base64 会把请求体放大 4/3，
+超限直接报错，比拖到超时好排查。
 
 ### @ 之后继续聊（0.16.3）
 

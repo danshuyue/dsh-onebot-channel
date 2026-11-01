@@ -225,7 +225,10 @@ console.log('端到端（看图 → 起名 → 收藏）：')
   await collectFace({ file: seen.path, desc: '一只猫比心' })
   const modify = calls.find((c) => c.action === 'modify_custom_face')
   eq(modify?.params?.desc, '一只猫比心', '看完图起的名字写进了收藏备注')
-  ok(calls[0].params.file.startsWith('file:///'), '收藏用的是本地 file:// 源')
+  // 收藏源必须是 base64:// —— 协议端可能在另一台机器上，file:// 它读不到（2026-11-02）
+  ok(calls[0].params.file.startsWith('base64://'), '收藏走 base64:// 内联字节（不是 file://）')
+  const roundTrip = Buffer.from(calls[0].params.file.slice('base64://'.length), 'base64')
+  ok(roundTrip.equals(readFileSync(seen.path)), '送出去的字节跟本地文件逐字节一致（GIF 帧没丢）')
 }
 
 rmSync(tmp, { recursive: true, force: true })
