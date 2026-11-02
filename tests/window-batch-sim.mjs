@@ -438,6 +438,25 @@ console.log('@ 之前先投递积压的续聊：')
   ok(agedText.includes('可能已经过时，优先回最新的'), '措辞是「可能过时、优先回最新的」，不是「请忽略」')
   ok(!agedText.includes('请忽略'), '没有写成「请忽略」（那会让模型整批丢掉有效内容）')
 
+  // F. 并发双 @ 的投递顺序不能被打乱（0.16.16 审核发现）
+  //    @ 路径里有 `await flushPendingNow`，一旦 await，同群第二条 @ 会抢先投递 ——
+  //    实测顺序反成 #104 → #103（0.16.12 是正确的 #103 → #104）。
+  //    这正好是本次要修的「顺序错乱」的另一种形态，所以必须钉住。
+  await resetWindow()
+  const c1 = msg(PEER, 1101, 101, '并发第一条')
+  const c2 = msg(PEER, 1102, 102, '并发第二条')
+  for (const item of [c1, c2]) queueWindowMessage(GROUP, item)
+  const concurrent = await Promise.all([
+    handleGroupMessage(ctx, GROUP, at(PEER, 1103, 103, '并发 @ 甲'), []),
+    handleGroupMessage(ctx, GROUP, at(PEER, 1104, 104, '并发 @ 乙'), [])
+  ])
+  ok(concurrent.every((r) => r.status === 'delivered'), '两条并发 @ 都投递成功')
+  ok(delivered.length === 3, `并发场景共 3 次 followup（批次 + 两条 @），实际 ${delivered.length}`)
+  ok(bodyOf(0).includes('并发第一条'), '积压批次排在最前')
+  ok(bodyOf(1).includes('并发 @ 甲') && bodyOf(2).includes('并发 @ 乙'), '两条 @ 按到达顺序投递（甲在前、乙在后）')
+  ok(delivered.filter((m) => (m.content?.[0]?.text ?? '').includes('并发第一条')).length === 1,
+    '积压批次只投一次（并发 @ 不会各投一遍）')
+
   stopAtLoop()
   closeWindow(GROUP, 'at-flush-test-done')
 }
