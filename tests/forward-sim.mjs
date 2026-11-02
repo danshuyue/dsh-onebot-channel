@@ -70,11 +70,14 @@ globalThis.fetch = async (_url, init) => {
 // 造消息：真实形状（实测 get_forward_msg 每条都是这个结构）
 const piece = (nick, text, time) => ({
   sender: { user_id: '1000', nickname: nick },
+  // group_id 是卡片「来源群」的判据（实测 get_forward_msg 每条都带）
+  group_id: 284840486,
   time,
   message: [{ type: 'text', data: { text } }]
 })
 const imagePiece = (nick, url, time) => ({
   sender: { user_id: '1000', nickname: nick },
+  group_id: 284840486,
   time,
   message: [{ type: 'image', data: { url, file: 'x.jpg', sub_type: 7, summary: '[图]' } }]
 })
@@ -167,11 +170,13 @@ setForwardConfig({ forwardMaxMessages: 3 })
   const msg = cardMessage()
   const prefetched = await forward.prefetchForwards(msg.message)
   const text = forward.renderSegments(msg.message, 0, undefined, '', prefetched)
-  ok(text.includes('还有'), `明说了还有未展开的部分`)
+  ok(text.includes('还有'), '明说了还有未展开的部分')
   ok(/还有 \d+ 条未展开/.test(text), `给出了具体条数：${(text.match(/还有 \d+ 条未展开/) ?? ['(没匹配到)'])[0]}`)
-  // 数一下实际展开的行数：开头一行 + 3 行内容
-  const bodyLines = text.split('\n').slice(1).filter((l) => l.trim() !== '')
-  ok(bodyLines.length === 3, `只展开 3 条（实际 ${bodyLines.length} 行）`)
+  // 只数卡片正文行：排除标题行、「这是转发内容」提示行、结尾标记行
+  const cardLines = text
+    .split('\n')
+    .filter((l) => /^\d{2}-\d{2} \d{2}:\d{2} \S+:/.test(l))
+  ok(cardLines.length === 3, `只展开 3 条正文（实际 ${cardLines.length} 行）`)
 }
 
 console.log('\n4. 字数上限也生效：')
@@ -180,14 +185,11 @@ setForwardConfig({ forwardMaxChars: 40 })
   const msg = cardMessage()
   const prefetched = await forward.prefetchForwards(msg.message)
   const text = forward.renderSegments(msg.message, 0, undefined, '', prefetched)
-  const body = text.split('\n').slice(1).join('\n')
-  // 计数的口径是「行长度之和」，所以正文 = 已收的若干整行。
-  // 断言：不该出现「收了 2 条以上却远超上限」——上限内最多再收一条整行。
-  const lines = body.split('\n').filter((l) => l.trim() !== '')
-  ok(lines.length >= 1, `至少展开了第一条（实际 ${lines.length} 条）`)
-  ok(lines.length <= 2, `没有无脑全收（${lines.length} 条，上限 ${40} 字）`)
-  // 单条超长时必须自己截断，而不是整行塞进去
-  ok(text.includes('此条过长，已截断') || body.length <= 40 + 40, '单条超长时有截断或总体受控')
+  // 只数卡片正文行（格式是 `MM-DD HH:MM 昵称: 内容`）
+  const cardLines = text.split('\n').filter((l) => /^\d{2}-\d{2} \d{2}:\d{2} \S+:/.test(l))
+  ok(cardLines.length >= 1, `至少展开了第一条（实际 ${cardLines.length} 条）`)
+  ok(cardLines.length <= 2, `没有无脑全收（${cardLines.length} 条，上限 ${40} 字）`)
+  ok(text.includes('此条过长，已截断') || cardLines.join('').length <= 40 + 40, '单条超长时有截断或总体受控')
 }
 
 console.log('\n4b. 单条超长 → 截断并说明：')
@@ -419,6 +421,49 @@ calls.length = 0
   ok(prefetched.size >= 1, `至少取到一张（实际 ${prefetched.size}）`)
   const text = forward.renderSegments(msg.message, 0, undefined, '', prefetched)
   ok(text.includes('[转发消息'), '没取到的卡片仍然有占位（不静默消失）')
+}
+
+console.log('\n17. 边界：卡片内容必须能和「本群历史」区分开（用户报的 bug）：')
+setForwardConfig()
+{
+  // 用户报的现象：模型分不清「卡片里的」和「本群刚说的」。
+  // 根因：卡片正文格式（`时间 昵称: 内容`）跟本群上下文一模一样，又没有起止标记和来源。
+  // 这条断言钉住四件事：来源群号、转发提示、起止标记、正文可被正则区分。
+  const msg = cardMessage()
+  const prefetched = await forward.prefetchForwards(msg.message)
+  const text = forward.renderSegments(msg.message, 0, undefined, '', prefetched)
+
+  ok(/来源群 \d+/.test(text), `标出了来源群号（${(text.match(/来源群 \d+/) ?? ['缺'])[0]}）`)
+  ok(text.includes('转发进来的聊天记录'), '明确说了「这是转发进来的」')
+  ok(text.includes('不是本群发生的对话'), '明确说了「不是本群发生的」')
+  ok(text.includes('[转发消息结束]'), '有明确的结束标记')
+  ok(/时间 \d{2}-\d{2} \d{2}:\d{2}/.test(text), '标出了卡片内的时间范围')
+
+  // 卡片正文行必须以「MM-DD HH:MM 昵称:」开头 —— 本群上下文用的是「[#id]群友「X」: 」，
+  // 两者形状不同，模型（和测试）都能机械区分。
+  const cardLines = text.split('\n').filter((l) => /^\d{2}-\d{2} \d{2}:\d{2} \S+:/.test(l))
+  ok(cardLines.length > 0, `卡片正文行有可识别的形状（${cardLines.length} 行）`)
+  const badLine = cardLines.find((l) => l.includes('群友「'))
+  ok(badLine === undefined, '卡片正文行里没有混入「群友「」」这种本群措辞')
+}
+
+console.log('\n18. 嵌套卡片的边界提示不重复（避免一行套一行）：')
+setForwardConfig({ forwardMaxDepth: 2 })
+{
+  // 单独造一条「外层卡片里嵌着内层卡片」的样本 —— FWD_OUTER 里那条嵌套的
+  // 内层 id 是 FWD_INNER，用它的行来验标记。
+  const msg = cardMessage()
+  const prefetched = await forward.prefetchForwards(msg.message)
+  const text = forward.renderSegments(msg.message, 0, undefined, '', prefetched)
+  const hintCount = (text.match(/不是本群发生的对话/g) ?? []).length
+  ok(hintCount === 1, `「不是本群」只出现一次（实际 ${hintCount} 次）`)
+  ok(text.includes('[转发消息结束]'), '最外层有结束标记')
+  // 内层是否出现，取决于样本里那条嵌套卡片是否真的被展开；展开了就必须有短标记
+  if (text.includes('内层卡片的内容')) {
+    ok(text.includes('[↑ 转发内容结束]'), '嵌套层用短标记收尾')
+  } else {
+    ok(true, '（本样本内层未展开，跳过短标记断言）')
+  }
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)

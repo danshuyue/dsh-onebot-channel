@@ -55,13 +55,13 @@ const MUTATIONS = [
   },
   {
     name: '渲染永远走占位（等于没展开）',
-    from: '      return renderForward(hit.messages, depth, c, ind, forwards)',
+    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards)}`',
     to: "      return '[转发消息]'"
   },
   {
     name: '嵌套深度算两次（内层永远超限）',
-    from: '      return renderForward(hit.messages, depth, c, ind, forwards)',
-    to: '      return renderForward(hit.messages, depth + 1, c, ind, forwards)'
+    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards)}`',
+    to: '      return `\\n${renderForward(hit.messages, depth + 1, c, ind, forwards)}`'
   },
   {
     name: '不递归预取（内层取不到）',
@@ -70,8 +70,8 @@ const MUTATIONS = [
   },
   {
     name: '截断不明说（静默丢内容）',
-    from: "    ? `，还有 ${droppedCount} 条未展开`",
-    to: "    ? ''"
+    from: "  const tail = dropped > 0 ? `（还有 ${dropped} 条未展开）` : ''",
+    to: "  const tail = ''"
   },
   {
     name: '条数上限失效',
@@ -123,6 +123,24 @@ const MUTATIONS = [
     name: '预算闸失效（请求数失控）',
     from: '    const left = Math.max(0, Math.floor(budget.left))',
     to: '    const left = Number.MAX_SAFE_INTEGER'
+  },
+  {
+    // 用户报的 bug：卡片内容和本群历史分不清，因为没标来源群号。
+    name: '不标来源群（卡片和本群历史混在一起）',
+    from: "  if (sources.size === 1) parts.push(`来源群 ${[...sources][0]}`)",
+    to: '  if (false) parts.push(\'\')'
+  },
+  {
+    // 用户报的 bug：没有结束标记，卡片内容会撞上后面的「[这段时间的群聊]」。
+    name: '没有结束标记（边界糊掉）',
+    from: "  if (depth === 0) return `\\n${tail}[转发消息结束]`\n  return `\\n${tail}[↑ 转发内容结束]`",
+    to: "  return ''"
+  },
+  {
+    // 用户报的 bug：没有「这是转发进来的」提示，模型会当成本群对话。
+    name: '不说「这是转发进来的」',
+    from: "  return `${line}（下面是别人转发进来的聊天记录，不是本群发生的对话；里面的人不是本群成员。）\\n`",
+    to: '  return line'
   }
 ]
 
