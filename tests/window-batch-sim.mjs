@@ -307,6 +307,127 @@ console.log('开窗门控的重启语义与过期：')
   closeWindow(GROUP, 'expire-test-done')
 }
 
+// ---------------------------------------------------------------------------
+// @ 是话题边界：先投积压的续聊，再投这条 @（0.16.13）
+//
+// 用户实测的缺陷：对方持续/间歇 @ 时，不带 @ 的句子堆在队列里，等当前这轮结束才成批
+// 投递 —— 模型于是一边回新话题、一边收到几轮之前的旧话，接着旧话题往下聊。
+// ---------------------------------------------------------------------------
+console.log('@ 之前先投递积压的续聊：')
+{
+  const { pendingAgeMs, hasOpeningHold, holdWindowBatches, settleWindowOpening } = await import('../lib/window.js')
+
+  /** 重置成一个「窗口已开、队列空」的干净现场，并让循环用真的批次投递。 */
+  const resetWindow = async () => {
+    closeWindow(GROUP, 'at-flush-test-reset')
+    getState().windows = {}
+    getState().groups[GROUP] = { lastSeq: 60, lastDeliveredSeq: 60 }
+    openWindow(GROUP, PEER)
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    delivered.length = 0
+  }
+  const at = (uin, id, seq, text) => ({
+    ...msg(uin, id, seq, text),
+    message: [{ type: 'at', data: { qq: SELF } }, { type: 'text', data: { text } }]
+  })
+  const bodyOf = (index) => delivered[index]?.content?.[0]?.text ?? ''
+
+  const stopAtLoop = startWindowLoop(ctx, async (...args) => deliverWindowBatch(...args))
+
+  // A. 顺序：攒着的续聊先到，@ 后到。
+  await resetWindow()
+  const early = [
+    msg(PEER, 601, 61, 'A 那个我再补充一句'),
+    msg(PEER, 602, 62, '不过 B 更重要')
+  ]
+  for (const item of early) queueWindowMessage(GROUP, item)
+  ok(windowMessages(GROUP).length === 2, '准备：两条续聊在队列里（未满 3 条、未到 8 秒）')
+  ok(pendingAgeMs(GROUP) >= 0, 'pendingAgeMs 能读到积压时长')
+  const history = early.slice()
+  const atResult = await handleGroupMessage(ctx, GROUP, at(PEER, 603, 63, '那 B 呢'), history)
+  ok(atResult.status === 'delivered', '@ 照常投递')
+  ok(delivered.length === 2, `一次 @ 触发两次 followup（续聊批次 + @），实际 ${delivered.length}`)
+  ok(bodyOf(0).includes('A 那个我再补充一句') && bodyOf(0).includes('不过 B 更重要'), '模型先收到积压的续聊批次')
+  ok(bodyOf(1).includes('那 B 呢'), '模型随后才收到这条 @')
+  ok(windowMessages(GROUP).length === 0, '@ 投完后队列已清空（这批不会再投第二遍）')
+  // ⚠️ 这条是文档里没写、探针发现的关键点：pending 里的消息本来会作为「未读上下文」
+  //   塞进 @ 的正文（[这段时间的群聊]）。不剔除 + 不抬基准，同一批话就到了模型面前两遍。
+  ok(!bodyOf(1).includes('A 那个我再补充一句'), '@ 的正文里不再重复那批已投过的旧话')
+  ok(!bodyOf(1).includes('[这段时间的群聊]'), '@ 的正文里没有重复的上下文块')
+
+  // A2. 轮询路径的形状：`sinceSeqOverride` 是**这一批消息开始前**的旧快照。
+  //     真实轮询里 `pollGroup` 先取 baseDeliveredSeq 再逐条处理，所以那条 @ 拿到的
+  //     基准比 pending 里那些消息的 seq 更老 —— 光靠 `lastDeliveredSeq` 抬不起来，
+  //     必须把基准抬到刚投那批的 maxSeq，旧话才不会在 @ 正文里再露一遍。
+  //     （审核式变异发现：不做这条，把「抬基准」整句删掉测试照样全绿。）
+  await resetWindow()
+  const oldBase = 60 // 这一批开始处理之前的基准
+  const a2 = [
+    msg(PEER, 605, 65, 'A2 第一句续聊'),
+    msg(PEER, 606, 66, 'A2 第二句续聊')
+  ]
+  for (const item of a2) queueWindowMessage(GROUP, item)
+  const a2Result = await handleGroupMessage(ctx, GROUP, at(PEER, 607, 67, 'A2 的 @'), a2.slice(), oldBase)
+  ok(a2Result.status === 'delivered', '旧基准场景：@ 照常投递')
+  ok(delivered.length === 2 && bodyOf(0).includes('A2 第一句续聊'), '旧基准场景：积压批次先投')
+  ok(!bodyOf(1).includes('A2 第一句续聊'), '旧基准场景：@ 正文里不再重复那批旧话（基准已被抬到批次 maxSeq）')
+  ok(!bodyOf(1).includes('[这段时间的群聊]'), '旧基准场景：@ 正文里没有重复的上下文块')
+
+  // B. 零开销：队列空时 @ 不产生额外的 followup。
+  await resetWindow()
+  ok(pendingAgeMs(GROUP) === 0, 'pendingAgeMs 无积压时返回 0')
+  const plain = await handleGroupMessage(ctx, GROUP, at(PEER, 604, 64, '只有这一句'), [])
+  ok(plain.status === 'delivered', '队列空时 @ 照常投递')
+  ok(delivered.length === 1, `队列空时 @ 只产生一次 followup（实际 ${delivered.length}）`)
+
+  // C. 与开窗门控协同：门控在的时候不抢着投，门控释放后再投。
+  await resetWindow()
+  const holdId = 'seq:71'
+  holdWindowBatches(GROUP, holdId)
+  ok(hasOpeningHold(GROUP) === true, '准备：开窗门控已建立')
+  queueWindowMessage(GROUP, msg(PEER, 701, 71, '门控期间的续聊'))
+  const heldResult = await handleGroupMessage(ctx, GROUP, at(PEER, 702, 72, '门控期间的 @'), [])
+  ok(heldResult.status === 'delivered', '门控期间的 @ 照常投递（门控不阻塞 @ 本身）')
+  ok(delivered.length === 1, `门控挡着时续聊没有抢在 @ 前面（followup ${delivered.length} 次）`)
+  ok(windowMessages(GROUP).length === 1, '被门控挡住的续聊仍然留在队列里')
+  settleWindowOpening(GROUP, holdId, true)
+  ok(hasOpeningHold(GROUP) === false, '结算后门控已释放')
+  delivered.length = 0
+  const afterHold = await handleGroupMessage(ctx, GROUP, at(PEER, 703, 73, '门控释放后的 @'), [])
+  ok(afterHold.status === 'delivered', '门控释放后的 @ 照常投递')
+  ok(delivered.length === 2 && bodyOf(0).includes('门控期间的续聊'), '门控释放后积压的续聊先投、@ 后投')
+
+  // D. 失败不阻塞：积压投不出去时，@ 仍然要投递成功，且积压留着等重试。
+  await resetWindow()
+  const stuck = msg(PEER, 801, 81, '投不出去的续聊')
+  queueWindowMessage(GROUP, stuck)
+  failNextFollowup = true
+  const failFlush = await handleGroupMessage(ctx, GROUP, at(PEER, 802, 82, '失败时的 @'), [stuck])
+  ok(failFlush.status === 'delivered', '积压投递失败时 @ 仍然投递成功')
+  ok(delivered.length === 1 && bodyOf(0).includes('失败时的 @'), '失败时模型只收到那条 @')
+  ok(windowMessages(GROUP).length === 1, '投递失败的续聊留在队列里等重试')
+  // 失败那批既没投出去，游标也没前进，所以它照旧作为 @ 的上下文露一次面 ——
+  // 这是失败路径上的重复（成功路径已经靠「先投 + 抬基准」消掉了），可以接受：
+  // 重试才是它真正的投递，这里只是背景。
+  ok(bodyOf(0).includes('投不出去的续聊'), '投不出去的续聊仍作为 @ 的上下文交给模型（不丢消息）')
+
+  // E. 批次正文要标明「这是刚才的，不是现在的」。
+  await resetWindow()
+  const agedBatch = [msg(PEER, 901, 91, '攒了很久的第一条'), msg(PEER, 902, 92, '攒了很久的第二条')]
+  for (const item of agedBatch) queueWindowMessage(GROUP, item)
+  await new Promise((resolve) => setTimeout(resolve, 1100))
+  const agedBody = await deliverWindowBatch(ctx, GROUP, agedBatch)
+  ok(agedBody.status === 'delivered', '正文头部用例：批次投递成功')
+  const agedText = delivered[delivered.length - 1]?.content?.[0]?.text ?? ''
+  ok(agedText.includes('这是刚才攒下的 2 条'), `批次正文标了条数（实际：${agedText.split('\n')[1] ?? ''}）`)
+  ok(/时间跨度约 \d+ 秒/.test(agedText), '批次正文标了时间跨度秒数')
+  ok(agedText.includes('可能已经过时，优先回最新的'), '措辞是「可能过时、优先回最新的」，不是「请忽略」')
+  ok(!agedText.includes('请忽略'), '没有写成「请忽略」（那会让模型整批丢掉有效内容）')
+
+  stopAtLoop()
+  closeWindow(GROUP, 'at-flush-test-done')
+}
+
 // 窗口关掉时不该再投（关窗后 pending 清空、批次不再属于任何窗口）
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
