@@ -441,6 +441,21 @@ reply + at + text   ← 原样
   "splitDelayMinMs": 200,
   "splitDelayMaxMs": 700,
 
+  // ---- 合并转发（「群聊的聊天记录」卡片）----
+  // 旧版把一张卡片渲染成「[转发消息]」就交给模型了，等于丢掉了里面的内容。
+  // 现在会调 get_forward_msg 展开成真正的聊天记录（谁、什么时候、说了什么）。
+  "forwardExpandEnabled": true,   // 总开关。关掉 = 退回旧行为（只有占位）
+  "forwardMaxDepth": 2,           // 展开几层。0 = 不展开，1 = 只外层，2 = 连子卡片（默认）
+                                  // 没有硬上限 —— 层数越大请求越多、上下文越贵，自己权衡
+  "forwardMaxMessages": 50,       // 一张卡片最多展开多少条，超出会写明「还有 N 条未展开」
+  "forwardMaxChars": 2000,        // 一张卡片最多展开多少字，超出会截断并说明
+  "forwardImagesEnabled": false,  // 卡片里的图要不要也下载给她看（默认关：一张卡可能有十几张图）
+  "forwardImageLimit": 6,         // 开图时一次投递最多取几张
+  "forwardTimeoutMs": 4000,       // 单张卡片多久取不回来就放弃（比全局 8 秒短，别拖住投递链）
+  "forwardConcurrency": 3,        // 一次投递里最多**同时**展开几张卡片（并发数，不是总数上限）
+  "forwardMaxRequests": 16,       // 一次投递最多发几个展开请求 —— 防「层数调很大 + 嵌套多」拖停群投递
+  "forwardBudgetMs": 6000,        // 一次投递里展开最多花多久，超了按占位收摊
+
   "requestTimeoutMs": 8000                    // 协议端挂死时的超时
 }
 ```
@@ -604,13 +619,13 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-41 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+42 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
-| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） |
+| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
 | 能力与 UI | `tool.js`（11 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
