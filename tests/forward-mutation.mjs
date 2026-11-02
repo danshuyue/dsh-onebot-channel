@@ -17,7 +17,12 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..')
-const ORIGINAL_FORWARD = readFileSync(join(ROOT, 'lib', 'forward.js'), 'utf8')
+// 变异目标：默认 forward.js；个别变异针对 poll.js（卡片图片的路径覆盖）。
+const ORIGINALS = {
+  'forward.js': readFileSync(join(ROOT, 'lib', 'forward.js'), 'utf8'),
+  'poll.js': readFileSync(join(ROOT, 'lib', 'poll.js'), 'utf8')
+}
+const ORIGINAL_FORWARD = ORIGINALS['forward.js']
 
 // 沙箱放仓库外：插件目录里建新文件会 EPERM
 const SANDBOX = join(ROOT, '..', `.tmp-mutation-${process.pid}`)
@@ -37,7 +42,9 @@ function prepareSandbox() {
     copyFileSync(join(ROOT, 'package.json'), join(SANDBOX, 'package.json'))
   } catch {}
   // 测试脚本也拷进去（它们用 ../lib 相对路径）
-  writeFileSync(join(SANDBOX_TESTS, 'forward-sim.mjs'), readFileSync(join(HERE, 'forward-sim.mjs'), 'utf8'), 'utf8')
+  for (const name of ['forward-sim.mjs', 'forward-image-sim.mjs']) {
+    writeFileSync(join(SANDBOX_TESTS, name), readFileSync(join(HERE, name), 'utf8'), 'utf8')
+  }
 }
 
 function cleanup() {
@@ -141,12 +148,41 @@ const MUTATIONS = [
     name: '不说「这是转发进来的」',
     from: "  return `${line}（下面是别人转发进来的聊天记录，不是本群发生的对话；里面的人不是本群成员。）\\n`",
     to: '  return line'
+  },
+  {
+    // 用户报的 bug：私信路径漏了卡片图，图片全是 [图片] 占位。
+    // 这条变异针对 poll.js —— 把私信那处调用删掉，forward-image-sim 必须变红。
+    name: '私信路径不交卡片图（图片全是占位）',
+    file: 'poll.js',
+    from: '  const forwardImages = await buildForwardImageBlocks(ctx, messages, forwards)',
+    to: '  const forwardImages = []'
+  },
+  {
+    // 审核发现的第三条路：窗口批次有 batchForwards 却没交卡片图。
+    name: '窗口批次不交卡片图（第三条路漏了）',
+    file: 'poll.js',
+    from: '  const forwardImages = await buildForwardImageBlocks(ctx, list, batchForwards)',
+    to: '  const forwardImages = []'
+  },
+  {
+    // 审核发现：卡片图会污染「最近收到的图片」索引，qq_collect_face 会取到陌生人的图。
+    name: '卡片图污染「最近收到的图片」索引',
+    file: 'poll.js',
+    from: '    }], { remember: false })',
+    to: '    }])'
+  },
+  {
+    // 审核发现：预算闸放错粒度 —— 一张卡几十张图挤在一次调用里串行下，死线失效。
+    name: '预算闸失效（一次串行吃满时间）',
+    file: 'poll.js',
+    from: '  const deadline = Date.now() + Math.max(1000, Number(config.forwardBudgetMs) || 6000)',
+    to: '  const deadline = Number.MAX_SAFE_INTEGER'
   }
 ]
 
-function runSim() {
+function runOne(testName) {
   try {
-    execFileSync(process.execPath, [join(SANDBOX_TESTS, 'forward-sim.mjs')], {
+    execFileSync(process.execPath, [join(SANDBOX_TESTS, testName)], {
       stdio: 'pipe',
       encoding: 'utf8',
       cwd: SANDBOX
@@ -157,6 +193,13 @@ function runSim() {
     const failed = (output.match(/✗/g) ?? []).length
     return { failed: failed === 0 ? 1 : failed }
   }
+}
+
+/** 两个测试都要跑：forward-sim 管渲染，forward-image-sim 管图片路径覆盖。 */
+function runSim() {
+  const a = runOne('forward-sim.mjs')
+  const b = runOne('forward-image-sim.mjs')
+  return { failed: a.failed + b.failed }
 }
 
 prepareSandbox()
@@ -173,13 +216,16 @@ console.log('  ✓ 原始代码全过\n')
 let caught = 0
 const missed = []
 for (const m of MUTATIONS) {
-  if (!ORIGINAL_FORWARD.includes(m.from)) {
+  // 变异可以指定文件（默认 forward.js）；poll.js 的变异用来钉「路径覆盖」
+  const target = m.file ?? 'forward.js'
+  const original = ORIGINALS[target]
+  if (!original.includes(m.from)) {
     console.log(`  ? 「${m.name}」变异点没找到（源码改过了？）`)
     missed.push(`${m.name}（变异点缺失）`)
     continue
   }
-  const mutated = ORIGINAL_FORWARD.replace(m.from, m.to)
-  writeFileSync(join(SANDBOX_LIB, 'forward.js'), mutated, 'utf8')
+  const mutated = original.replace(m.from, m.to)
+  writeFileSync(join(SANDBOX_LIB, target), mutated, 'utf8')
   const result = runSim()
   if (result.failed > 0) {
     console.log(`  ✓ 抓到「${m.name}」—— ${result.failed} 条断言变红`)
@@ -188,8 +234,8 @@ for (const m of MUTATIONS) {
     console.log(`  ✗ 漏掉「${m.name}」—— 改坏了测试还是绿的`)
     missed.push(m.name)
   }
-  // 还原沙箱里的 forward.js，再跑下一个变异
-  writeFileSync(join(SANDBOX_LIB, 'forward.js'), ORIGINAL_FORWARD, 'utf8')
+  // 还原沙箱里的文件，再跑下一个变异
+  writeFileSync(join(SANDBOX_LIB, target), original, 'utf8')
 }
 
 cleanup()
