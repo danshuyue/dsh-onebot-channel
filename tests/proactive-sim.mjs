@@ -11,7 +11,7 @@ import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap,
+  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge,
   notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE, flushPersist,
   targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
@@ -245,6 +245,16 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   })
   ok(r.ok === false && r.reason === 'not-idle-enough', '刚主动过 1 分钟 → 空闲不够，不能再开口')
   ok(r.eligibleAt === NOW - 60 * 1000 + 6 * HOUR, '起算点是「上次主动」，不是「上次来信」')
+}
+
+// ---- 主动搭话的正文要带「现在几点」 ----
+{
+  ok(formatClock(NOW).startsWith('2026-10-29 14:00'), '时刻格式：年月日 时:分（本地时区）')
+  ok(formatClock(NOW).endsWith('（周四）'), '时刻里带星期几')
+  const text = composeNudge('private:100', { lastIncomingAt: NOW - 7 * HOUR }, NOW)
+  ok(text.includes('现在是 2026-10-29 14:00'), '内部来信里写清了当前时间')
+  ok(text.includes('距上次说话已经 7 小时'), '仍然保留「距上次说话多久」')
+  ok(text.includes('qq_pass'), '仍然保留了「可以不说」的出口')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
