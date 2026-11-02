@@ -461,6 +461,146 @@ console.log('@ 之前先投递积压的续聊：')
   closeWindow(GROUP, 'at-flush-test-done')
 }
 
+// ---------------------------------------------------------------------------
+// 独立审核发现的 8 条（0.16.16）
+//
+// 这一段的每条都对应审核员用探针实测复现过的问题。它们有个共同点：
+// **79 条既有断言全绿，缺陷照样在** —— 因为既有断言只测「主路径走没走」，
+// 没测并发、退避、skipped、基准回拨、关盘落盘这些分支。
+// ---------------------------------------------------------------------------
+console.log('审核发现 #5：handler 返回 skipped 时消息不能消失：')
+{
+  const { windowMessages: wm, startWindowLoop: swl, setWindowBatchHandler, flushPendingNow } = await import('../lib/window.js')
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 300, lastDeliveredSeq: 300 } }
+  openWindow(GROUP, PEER)
+  // handler 明确说「这次没投」—— 消息必须留着
+  setWindowBatchHandler(async () => ({ status: 'skipped' }))
+  queueWindowMessage(GROUP, msg(PEER, 3001, 301, 'skipped 测试'))
+  const r = await flushPendingNow({}, GROUP)
+  ok(r.status === 'skipped', `flushPendingNow 返回 skipped（实际 ${r.status}）`)
+  ok(wm(GROUP).length === 1, 'skipped 后消息【仍在】队列里（旧实现会静默剔除 = 丢消息）')
+  ok((r.deliveredIds ?? []).length === 0, 'skipped 时不返回 deliveredIds（否则 poll 会把上下文也剔掉）')
+  closeWindow(GROUP, 'skipped-test-done')
+}
+
+console.log('审核发现 #6：退避期内不强投：')
+{
+  const { setWindowBatchHandler, flushPendingNow, windowMessages: wm } = await import('../lib/window.js')
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 310, lastDeliveredSeq: 310 } }
+  openWindow(GROUP, PEER)
+  let calls = 0
+  setWindowBatchHandler(async () => { calls += 1; return { status: 'failed' } })
+  queueWindowMessage(GROUP, msg(PEER, 3101, 311, '总失败'))
+  const first = await flushPendingNow({}, GROUP)
+  ok(first.status === 'failed', '第一次真投（失败）')
+  const callsAfterFirst = calls
+  const second = await flushPendingNow({}, GROUP)
+  ok(calls === callsAfterFirst, `退避期内【没有】再投一次（实际多投了 ${calls - callsAfterFirst} 次）`)
+  ok(second.status === 'skipped', `退避期内返回 skipped（实际 ${second.status}）`)
+  ok(wm(GROUP).length === 1, '失败的消息仍在队列里等重试')
+  closeWindow(GROUP, 'retry-test-done')
+}
+
+console.log('审核发现 #3：stop() 要清掉 handler：')
+{
+  const { startWindowLoop: swl, flushPendingNow, setWindowBatchHandler } = await import('../lib/window.js')
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 320, lastDeliveredSeq: 320 } }
+  openWindow(GROUP, PEER)
+  let oldCalled = 0
+  const stop = swl({}, async () => { oldCalled += 1; return { status: 'delivered' } })
+  stop()
+  queueWindowMessage(GROUP, msg(PEER, 3201, 321, '卸载后不该被旧 handler 投'))
+  const r = await flushPendingNow({}, GROUP)
+  ok(oldCalled === 0, `stop() 之后旧 handler【没有】被调用（实际调了 ${oldCalled} 次）`)
+  ok(r.status === 'skipped', `没有 handler 时返回 skipped（实际 ${r.status}）`)
+  ok(windowMessages(GROUP).length === 1, '消息留着等新 handler')
+  closeWindow(GROUP, 'stop-test-done')
+}
+
+console.log('审核发现 #4：身份口径（seq:null 不能撞成 seq:0）：')
+{
+  const { messageIdentities } = await import('../lib/window.js')
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 330, lastDeliveredSeq: 330 } }
+  openWindow(GROUP, PEER)
+  // message_seq: null 的两条不同消息，不能撞同一个身份
+  const a = { message_id: '', message_seq: null, sender: { user_id: PEER }, message: [{ type: 'text', data: { text: 'A' } }] }
+  const b = { message_id: '', message_seq: null, sender: { user_id: PEER }, message: [{ type: 'text', data: { text: 'B' } }] }
+  ok(!messageIdentities(a).includes('seq:0'), 'seq:null 不产出 seq:0')
+  const qa = queueWindowMessage(GROUP, a)
+  const qb = queueWindowMessage(GROUP, b)
+  ok(qa === true && qb === true, '两条无 id 无 seq 的消息都能入队（不会把第二条当重复丢掉）')
+  ok(windowMessages(GROUP).length === 2, `两条都在队列里（实际 ${windowMessages(GROUP).length}）`)
+  // 同一条消息的两种形状要能互相识别
+  const wsShape = { message_id: '', message_seq: 331, sender: { user_id: PEER }, message: [] }
+  const httpShape = { message_id: '-123456', message_seq: 331, sender: { user_id: PEER }, message: [] }
+  const ids = messageIdentities(wsShape)
+  const ids2 = messageIdentities(httpShape)
+  ok(ids.includes('seq:331') && ids2.includes('seq:331'), '两种形状都带 seq:331（跨通路能对上）')
+  ok(ids2.includes('id:-123456'), 'HTTP 形状额外带 id')
+  closeWindow(GROUP, 'identity-test-done')
+}
+
+console.log('审核发现 #8b：关窗后盘上的 pending 不能复活：')
+{
+  const { getState: gs, saveState } = await import('../lib/state.js')
+  const { resetRecoveredWindows } = await import('../lib/window.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 340, lastDeliveredSeq: 340 } }
+  openWindow(GROUP, PEER)
+  queueWindowMessage(GROUP, msg(PEER, 3401, 341, '关窗前的旧话'))
+  ok(gs().windows[GROUP]?.pending?.length === 1, '准备：pending 已落盘')
+  closeWindow(GROUP, 'persist-test-done')
+  ok(gs().windows[GROUP]?.pending === undefined, '关窗后盘上的 pending 被删掉')
+  ok(gs().windows[GROUP]?.pendingSince === undefined, '关窗后盘上的 pendingSince 被删掉')
+  saveState({ windows: gs().windows })
+  resetRecoveredWindows()
+  ok(windowMessages(GROUP).length === 0, '重启恢复不会把上个窗口丢弃的旧话捞回来')
+}
+
+console.log('审核发现 #8a：lastDeliveredSeq 不能回拨：')
+{
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 400, lastDeliveredSeq: 400 } }
+  openWindow(GROUP, PEER)
+  // 模拟：先投一条 seq 大的 @（基准推到 402），再投一批 seq 小的旧批次（403 之前）
+  await deliverWindowBatch(ctx, GROUP, [msg(PEER, 4001, 402, '先到的大 seq')])
+  const afterBig = gs().groups[GROUP].lastDeliveredSeq
+  await deliverWindowBatch(ctx, GROUP, [msg(PEER, 4002, 401, '后投的小 seq')])
+  const afterSmall = gs().groups[GROUP].lastDeliveredSeq
+  ok(afterSmall >= afterBig, `基准只前进不回拨（${afterBig} → ${afterSmall}）`)
+  closeWindow(GROUP, 'seq-test-done')
+}
+
+console.log('审核发现 #7：跨度不能低报：')
+{
+  const { pendingAgeMs, setWindowBatchHandler } = await import('../lib/window.js')
+  const { getState: gs } = await import('../lib/state.js')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 500, lastDeliveredSeq: 500 } }
+  openWindow(GROUP, PEER)
+  // 老消息先入队，等一会儿，再来一条新的
+  queueWindowMessage(GROUP, msg(PEER, 5001, 501, '等了很久的老消息'))
+  await new Promise((resolve) => setTimeout(resolve, 120))
+  queueWindowMessage(GROUP, msg(PEER, 5002, 502, '刚到的新消息'))
+  ok(pendingAgeMs(GROUP) >= 100, `跨度按最早那条算（实际 ${pendingAgeMs(GROUP)}ms）`)
+  // 只投掉老的那条，剩下的新消息跨度应该≈0，不能变成「也很久」
+  setWindowBatchHandler(async () => ({ status: 'delivered' }))
+  const { flushPendingNow } = await import('../lib/window.js')
+  await flushPendingNow({}, GROUP) // 投掉两条
+  ok(windowMessages(GROUP).length === 0, '全部投完')
+  ok(pendingAgeMs(GROUP) === 0, '队列空了跨度归 0')
+  closeWindow(GROUP, 'age-test-done')
+}
+
 // 窗口关掉时不该再投（关窗后 pending 清空、批次不再属于任何窗口）
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
