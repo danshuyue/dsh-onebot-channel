@@ -62,8 +62,8 @@ globalThis.fetch = async () => ({ ok: true, json: async () => ({ retcode: 0, dat
 
 const { loadConfig, getConfig } = await import('../lib/config.js')
 const { loadState, getState } = await import('../lib/state.js')
-const { openWindow, windowOf } = await import('../lib/window.js')
-const { deliverWindowBatch } = await import('../lib/poll.js')
+const { openWindow, windowOf, closeWindow, windowMessages } = await import('../lib/window.js')
+const { deliverWindowBatch, handleGroupMessage } = await import('../lib/poll.js')
 
 loadConfig()
 loadState()
@@ -127,6 +127,35 @@ ok(delivered.length === 1, `续聊消息进了会话（followup 调用 ${deliver
 const text = delivered[0]?.content?.[0]?.text ?? ''
 ok(text.includes('再补一句') && text.includes('还有一件事'), '两条续聊正文都在投递内容里')
 ok(windowOf(GROUP) !== null, '投递后窗口仍然开着')
+
+console.log('并发续聊：')
+closeWindow(GROUP, 'race-test-reset')
+getState().groups[GROUP] = { lastSeq: 12, lastDeliveredSeq: 12 }
+cfg.forwardExpandEnabled = true
+let releaseForward
+let forwardReady
+const forwardBlocked = new Promise((resolve) => { releaseForward = resolve })
+const requestedForward = new Promise((resolve) => { forwardReady = resolve })
+globalThis.fetch = async (_url, options) => {
+  const payload = JSON.parse(options.body)
+  if (payload.action === 'get_forward_msg') {
+    forwardReady()
+    await forwardBlocked
+  }
+  return { ok: true, json: async () => ({ retcode: 0, data: { messages: [] } }) }
+}
+const trigger = {
+  ...msg(PEER, 201, 13, '开启连续对话'),
+  message: [{ type: 'at', data: { qq: SELF } }, { type: 'forward', data: { id: 'race-forward' } }]
+}
+const opening = handleGroupMessage(ctx, GROUP, trigger, [])
+await requestedForward
+const followup = await handleGroupMessage(ctx, GROUP, msg(PEER, 202, 14, '紧接着补充'))
+ok(followup.status === 'queued', `开窗投递尚未完成时的续聊已入队（${followup.status}）`)
+ok(windowMessages(GROUP).some((item) => item.message_id === 202), '并发续聊仍保留在窗口 pending 中')
+releaseForward()
+const triggerResult = await opening
+ok(triggerResult.status === 'delivered', '延迟处理的 @ 消息最终投递成功')
 
 // 窗口关掉时不该再投（关窗后 pending 清空、批次不再属于任何窗口）
 console.log(`\n结果：${passed} 过 / ${failed} 败`)

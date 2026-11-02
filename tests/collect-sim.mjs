@@ -365,6 +365,23 @@ console.log('findCustomFace：')
   ok(hit !== null, '按小写 hash 也能找到（大小写无关匹配）')
 }
 {
+  customFaceList = [
+    { emojiId: 'face-weak', url: '', summary: '委屈小猫', desc: '委屈小猫 | 委屈' },
+    { emojiId: 'face-strong', url: '', summary: '柴犬哭哭', desc: '委屈柴犬 | 委屈 难过 求安慰' },
+    { emojiId: 'face-other', url: '', summary: '开心小猫', desc: '开心小猫 | 开心 撒娇' }
+  ]
+  calls = []
+  const hit = await findCustomFace('委屈，求安慰')
+  eq(hit?.emojiId, 'face-strong', '多个关键词按命中数排序，挑中标签更匹配的收藏表情')
+  eq(calls.find((c) => c.action === 'fetch_custom_face_detail')?.params.count, 100, '搜索默认读取前 100 项（与收藏夹列表一致）')
+}
+{
+  customFaceList = [{ emojiId: 'face-tagged', url: '', summary: '兔子', desc: '委屈兔 | 撒娇 求抱抱' }]
+  const hit = await findCustomFace('求抱抱')
+  eq(hit?.emojiId, 'face-tagged', '可直接按单个分类关键词检索')
+  eq(await findCustomFace('，/'), null, '只有分隔符的搜索词不误选表情')
+}
+{
   customFaceList = []
   eq(await findCustomFace('不存在的表情'), null, '找不到返回 null')
 }
@@ -456,6 +473,11 @@ console.log('image=N 选图：')
   globalThis.fetch = realFetch
   imageDownload = null
 }
+
+const toolSource = (await import('node:fs')).readFileSync(new URL('../lib/tool.js', import.meta.url), 'utf8')
+ok(toolSource.includes('先用 custom_emoji 从收藏夹找语义合适的表情包'), '发送指引把收藏表情列为视觉反应的首选')
+ok(toolSource.includes('普通图片只有在你清楚看出它是可复用的梗图/反应图时才收藏'), '收藏指引限制普通图片必须是明确可复用的表情包')
+ok(toolSource.includes('简短名称 | 2-4 个关键词'), '收藏指引要求备注包含可搜索关键词')
 
 rmSync(tempDir, { recursive: true, force: true })
 
