@@ -37,7 +37,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 11 个工具：
+装好之后 agent 有 13 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
@@ -46,6 +46,8 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_msg_history` | 查群 / 好友历史消息（**返回的图能看见**，0.12.0） | `group_id` `user_id` `count` `before_message_id` |
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` |
 | `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
+| `qq_face_pick` | 按情绪/场景**挑**收藏表情，只列候选不发送（0.16.14） | `query` `limit` |
+| `qq_face_rename` | 看图给收藏表情**改名**成「名称 \| 情绪词」（0.16.14） | `emoji_id` `desc` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
 | `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
 | `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
@@ -153,6 +155,16 @@ QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插�
 ### 收藏表情：关键词找回并优先使用（0.16.11）
 
 回复确实需要视觉反应时，先按 QQ 收藏备注里的名称和关键词匹配商城大表情；没有合适项时再考虑经典小表情。备注建议写成「简短名称 | 2-4 个关键词」，如「委屈小猫 | 委屈 撒娇 求安慰」。多关键词会按命中数优先选择。
+
+### 收藏表情要能用得上（0.16.14）
+
+**标签决定能不能搜到。** 收藏备注是以后按情绪找回它的唯一线索，所以收藏时 `desc` 必须写成「名称 | 2-4 个情绪词」。写成剧情（「他甩了我那天」）就永远搜不到了 —— 想被别人在什么心情下翻出来，就写那个心情。
+
+碰到搜不到的**老收藏**，用 `qq_face_rename` 看图改名：不带 `desc` 调一次会把那张图直接送到她眼前，看清是什么情绪之后，再用 `desc` 写成「名称 | 2-4 个情绪词」。实测本机 22 个收藏里 21 个的备注是句子，按「委屈 / 无语」搜一律落空。
+
+要配表情时先调 `qq_face_pick`（按情绪列候选，只查不发），挑一个再传给 `qq_send` 的 `custom_emoji`。
+
+**表情填错不连累文字。** `custom_emoji` 匹配不上时只跳过表情、话照发，返回值里会带 `custom_emoji_missed` 说一声。只有「只发一个表情、没有文字、表情也没匹配上」才算真失败 —— 那种情况确实没东西可发。
 
 明确的 QQ 商城/动画表情可主动收藏；普通图片仅在明显是可复用的梗图或反应图时收藏，不收照片、截图、文件和聊天记录卡片。每条消息最多收一张；图已显示在上下文中时可直接按消息编号收藏。
 
@@ -649,7 +661,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（11 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 能力与 UI | `tool.js`（12 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
@@ -689,7 +701,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 11 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 12 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
@@ -715,4 +727,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-11-03 · v0.16.13*
+*最后更新：2026-11-03 · v0.16.14*

@@ -475,9 +475,14 @@ console.log('image=N 选图：')
 }
 
 const toolSource = (await import('node:fs')).readFileSync(new URL('../lib/tool.js', import.meta.url), 'utf8')
-ok(toolSource.includes('先用 custom_emoji 从收藏夹找语义合适的表情包'), '发送指引把收藏表情列为视觉反应的首选')
+// 这条原来钉的是「先用 custom_emoji 从收藏夹找语义合适的表情包」——
+// 那是 0.16.14 之前的被动式写法（「需要视觉反应时」），实测模型几乎不触发。
+// 现在改成正向 + 给动作（先调 qq_face_pick 看有什么），断言跟着**意图**走，不钉字面。
+ok(toolSource.includes('qq_face_pick'), '发送指引把「先查收藏夹」写成了明确动作')
+ok(toolSource.includes('不要为了用表情而用表情'), '发送指引仍保留防滥用的边界')
+ok(toolSource.includes('匹配不上时只跳过表情'), '发送指引明确了表情失败不连累文字（消除负向强化）')
 ok(toolSource.includes('普通图片只有在你清楚看出它是可复用的梗图/反应图时才收藏'), '收藏指引限制普通图片必须是明确可复用的表情包')
-ok(toolSource.includes('简短名称 | 2-4 个关键词'), '收藏指引要求备注包含可搜索关键词')
+ok(toolSource.includes('简短名称 | 2-4 个'), '收藏指引要求备注包含可搜索关键词')
 
 rmSync(tempDir, { recursive: true, force: true })
 
