@@ -91,7 +91,7 @@ const {
   noteCloseRefused, clearCloseRefusals, closeRefusalCount, CLOSE_REFUSE_LIMIT
 } = await import('../lib/window.js')
 const { registerCloseTool, registerPassTool, registerSendTool } = await import('../lib/tool.js')
-const { turnHandled_, clearTurnHandled: resetTurnHandledFor } = await import('../lib/rhythm.js')
+const { wasTurnHandled, clearTurnHandled: resetTurnHandledFor } = await import('../lib/rhythm.js')
 
 loadConfig()
 loadState()
@@ -207,7 +207,7 @@ console.log('给她一个「说完就走」的出口：')
 
   // 先 qq_pass 划走（= 这一回合她处理过了）
   await pass.execute({ group_id: GROUP, why: '不想接' })
-  ok(turnHandled_(`group:${GROUP}`) === true, 'qq_pass 会记下「本回合已处理」')
+  ok(wasTurnHandled(`group:${GROUP}`) === true, 'qq_pass 会记下「本回合已处理」')
 
   const result = await close.execute({ group_id: GROUP, summary: '', next: '' })
   ok(result.ok === true, '同回合划走过之后，qq_close 可以关窗')
@@ -223,7 +223,7 @@ console.log('给她一个「说完就走」的出口：')
   await resetWindow()
   theirLast = '为什么啊'
   await regs.get('qq_send').execute({ group_id: GROUP, text: '因为这样比较稳' })
-  ok(turnHandled_(`group:${GROUP}`) === true, 'qq_send 会记下「本回合已处理」')
+  ok(wasTurnHandled(`group:${GROUP}`) === true, 'qq_send 会记下「本回合已处理」')
   const result = await close.execute({ group_id: GROUP, summary: '聊清楚了', next: '' })
   ok(result.ok === true && result.closed === true, '同回合说过话之后，qq_close 也能关窗')
   ok(windowOf(GROUP) === null, '窗口已关闭')
@@ -515,8 +515,96 @@ console.log('qq_skip：「判断不用回」时正文必须真的不发：')
     ok(closed.ok === true, 'qq_skip 之后 qq_close 也能放行（都算"处理过了"）')
   }
 
+  // --- F. 空文本回合也要消费掉 qq_skip 标志，不能留到下一回合（审核发现）---
+  {
+    sent.length = 0
+    outbound.clear()
+    await skip.execute({ user_id: '4321', why: '第一回合空' })
+    // 第一回合：调了 skip，但正文是空的
+    const emptyTurn = [
+      { seq: 1, type: 'user/message', data: {} },
+      { seq: 2, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '' }] } } },
+      { seq: 3, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-EMPTY', fakeAgent2(emptyTurn), 0, { kind: 'private', id: '4321' })
+    await flushOutbound()
+    ok(sent.length === 0, '空文本回合什么都不发')
+
+    // 第二回合：没调 skip，正常回一句 —— 必须真的发出去
+    sent.length = 0
+    const normalTurn = [
+      { seq: 4, type: 'user/message', data: {} },
+      { seq: 5, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这一句必须发出去' }] } } },
+      { seq: 6, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-EMPTY', fakeAgent2(normalTurn), 0, { kind: 'private', id: '4321' })
+    await flushOutbound()
+    const body = sent.map((m) => JSON.stringify(m.params ?? {})).join('|')
+    // ⚠️ 空文本回合如果没消费掉标志，标志会留到这一回合，把这句正常的话吞掉。
+    ok(body.includes('这一句必须发出去'), '空文本回合没把 qq_skip 标志漏到下一回合')
+  }
+
+  // --- G. qq_send 早退分支也不能让标志泄漏到下一回合（审核发现）---
+  //   这是最隐蔽的一条：本回合 qq_send 成功 → 提前 continue，
+  //   如果标志没在那之前消费，它会留到下一回合把正常的话吞掉。
+  {
+    sent.length = 0
+    outbound.clear()
+    await skip.execute({ user_id: '5678', why: '本回合要跳过' })
+    const sentTurn = [
+      { seq: 1, type: 'user/message', data: {} },
+      { seq: 2, type: 'tool/call', data: { name: 'qq_send', callId: 'call-x' } },
+      { seq: 3, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '工具发过的话' }] } } },
+      { seq: 4, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-EARLY', fakeAgent2(sentTurn), 0, { kind: 'private', id: '5678' })
+    await flushOutbound()
+
+    // 下一回合：没调 skip，正常回一句 —— 必须真的发出去
+    sent.length = 0
+    const nextTurn = [
+      { seq: 5, type: 'user/message', data: {} },
+      { seq: 6, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '下一回合这句必须发' }] } } },
+      { seq: 7, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-EARLY', fakeAgent2(nextTurn), 0, { kind: 'private', id: '5678' })
+    await flushOutbound()
+    const body = sent.map((m) => JSON.stringify(m.params ?? {})).join('|')
+    ok(body.includes('下一回合这句必须发'), 'qq_send 早退的回合没把 qq_skip 标志漏到下一回合')
+  }
+
   globalThis.fetch = realFetch2
   outbound.clear()
+}
+
+// ---------------------------------------------------------------------------
+// 8. 「本回合」账本必须跟着新消息清掉（0.16.16 审核发现）
+//
+// 不清的话那些标志靠 TTL 活 10 分钟 —— 等于「最近 10 分钟说过话就能随便收摊」，
+// 期间对方提出新问题也会被放行关窗，违反 closure.js 的红线 2。
+// ---------------------------------------------------------------------------
+console.log('本回合账本跟着新消息清掉：')
+{
+  const { markIncoming, noteTurnHandled, wasTurnHandled, noteSkipTurn, skipTurnRequested } = await import('../lib/rhythm.js')
+
+  // 说过话之后，同回合内仍然认账
+  noteTurnHandled('group:CLEAR')
+  ok(wasTurnHandled('group:CLEAR') === true, '同回合内「处理过」成立')
+
+  // 新消息进来 → 账本清掉
+  markIncoming('group:CLEAR')
+  ok(wasTurnHandled('group:CLEAR') === false, '新消息到达后「处理过」失效（不能跨回合放行）')
+
+  // qq_skip 的标志同样要被清掉（否则下一条消息的回合会被吞）
+  noteSkipTurn('group:CLEAR2')
+  markIncoming('group:CLEAR2')
+  ok(skipTurnRequested('group:CLEAR2') === false, '新消息到达后 qq_skip 标志失效（不会吞下一回合）')
+
+  // 但不能误伤：清的是这个 key，别的 key 不受影响
+  noteTurnHandled('group:OTHER')
+  markIncoming('group:CLEAR3')
+  ok(wasTurnHandled('group:OTHER') === true, '清账只清这个 key，不影响别的会话')
+  wasTurnHandled('group:OTHER') // 消费掉
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)

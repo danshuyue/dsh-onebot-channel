@@ -478,7 +478,11 @@ const toolSource = (await import('node:fs')).readFileSync(new URL('../lib/tool.j
 // 这条原来钉的是「先用 custom_emoji 从收藏夹找语义合适的表情包」——
 // 那是 0.16.14 之前的被动式写法（「需要视觉反应时」），实测模型几乎不触发。
 // 现在改成正向 + 给动作（先调 qq_face_pick 看有什么），断言跟着**意图**走，不钉字面。
-ok(toolSource.includes('qq_face_pick'), '发送指引把「先查收藏夹」写成了明确动作')
+//
+// ⚠️ 钉的必须是 qq_send 描述里**独有**的片段（0.16.16 审核发现）：
+//   原来这条写的是 `includes('qq_face_pick')` —— 那个词在整个 tool.js 里到处都是
+//   （函数名、name 字段、注释），把描述里那句指引整句删掉它照样绿，等于空断言。
+ok(toolSource.includes('按情绪看一眼收藏夹里有什么'), '发送指引把「先查收藏夹」写成了明确动作')
 ok(toolSource.includes('不要为了用表情而用表情'), '发送指引仍保留防滥用的边界')
 ok(toolSource.includes('匹配不上时只跳过表情'), '发送指引明确了表情失败不连累文字（消除负向强化）')
 ok(toolSource.includes('普通图片只有在你清楚看出它是可复用的梗图/反应图时才收藏'), '收藏指引限制普通图片必须是明确可复用的表情包')

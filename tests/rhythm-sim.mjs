@@ -221,6 +221,15 @@ console.log('closure · 「吧」结尾是让步，不是提问：')
   eq(classifyUtterance('我觉得这样安排吧，明天再说'), 'substantive', '长句里的「吧」不算附和')
   eq(assessClosure({ mine: '好', theirs: '我觉得这样安排吧，明天再说' }).openQuestion, false, '长句不会被当成提问')
 
+  // 「吧」结尾的**非让步**句必须仍被当成疑问（0.16.16 审核发现）：
+  //   让步靠白名单（YIELD_PATTERNS）认，疑问靠正则兜底 —— 两者不是二选一。
+  //   我一度把 QUESTION_RE 里的 `吧$` 删了，结果「这样可以吧」「对吧」被判成 ack，
+  //   openQuestion=false、qq_close 直接放行，等于把「对方在确认」当成「聊完了」。
+  for (const text of ['这样可以吧', '对吧', '你会来的吧', '真的吧']) {
+    eq(classifyUtterance(text), 'question', `「${text}」是疑问，不是让步`)
+    eq(assessClosure({ mine: '好', theirs: text }).openQuestion, true, `「${text}」必须拦住收尾`)
+  }
+
   // 更多让步变体（同义说法五花八门，少写一个就会漏）
   for (const text of ['算了吧', '先这样吧', '随你', '也行吧', '没问题', '你说了算']) {
     const kind = classifyUtterance(text)

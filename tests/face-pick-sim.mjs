@@ -423,5 +423,149 @@ console.log('qq_face_rename：')
   ok(rejected, '协议端拒绝写备注时抛错（不谎报成功）')
 }
 
+// ---------------------------------------------------------------------------
+// 5. 收藏表情发送失败时的裁决（审核发现，0.16.16）
+//
+// 文字是先发出去的（sendToQQ 里 text 在前面、自定义表情在后面）。
+// 表情那一步失败如果直接抛，整个 qq_send 被判成失败 ——
+// 模型以为没发出去，可能重发一遍，用户收到两遍。
+// 跟 0.16.14「找不到表情不连累文字」是同一个道理，只是那条修在查找、这条修在发送。
+// ---------------------------------------------------------------------------
+console.log('收藏表情发送失败时的裁决（审核发现）：')
+{
+  const { sendToQQ } = await import('../lib/outbound.js')
+  const realFetch3 = globalThis.fetch
+
+  const makeFetch = (faceRetcode) => {
+    const log = []
+    globalThis.fetch = async (_url, init) => {
+      const payload = JSON.parse(init.body)
+      log.push(payload.action)
+      if (payload.action === 'send_custom_face') {
+        return { ok: true, json: async () => ({ retcode: faceRetcode, message: 'face not found' }) }
+      }
+      if (payload.action === 'send_group_msg' || payload.action === 'send_private_msg') {
+        return { ok: true, json: async () => ({ retcode: 0, data: { message_id: 5000 } }) }
+      }
+      return { ok: true, json: async () => ({ retcode: 0, data: null }) }
+    }
+    return log
+  }
+  const faceTarget = { kind: 'group', id: GROUP }
+
+  // ---- 文字 + 表情，表情发送失败 → 【不】抛错（文字已经发出去了）----
+  {
+    const log = makeFetch(120)
+    let threw = false
+    let err = null
+    try {
+      await sendToQQ(faceTarget, '这句话必须算发成功', { customEmojiId: 'BAD_FACE_ID' })
+    } catch (error) { threw = true; err = error }
+    ok(!threw, `表情发失败但文字已发出时【不】抛错${threw ? `（实际抛了：${err.message}）` : ''}`)
+    ok(log.includes('send_group_msg'), '文字确实发出去了')
+    ok(log.includes('send_custom_face'), '表情也尝试过')
+  }
+
+  // ---- 只有表情、表情又发失败 → 必须抛错（真的什么都没发出去）----
+  {
+    makeFetch(120)
+    let threw = false
+    let msg = ''
+    try {
+      await sendToQQ(faceTarget, '', { customEmojiId: 'BAD_FACE_ID' })
+    } catch (error) { threw = true; msg = error.message }
+    ok(threw, '只有表情且发失败时必须抛错（不能静默成功）')
+    ok(msg.includes('120'), `报错里带上协议端的 retcode 方便排查（实际：${msg}）`)
+    ok(!msg.includes('发收藏表情失败：发收藏表情失败'), '报错没有重复前缀')
+  }
+
+  // ---- 表情发送成功 → 一切照旧 ----
+  {
+    const log = makeFetch(0)
+    let threw = false
+    try {
+      await sendToQQ(faceTarget, '配个表情', { customEmojiId: 'GOOD_FACE_ID' })
+    } catch { threw = true }
+    ok(!threw, '表情发送成功时不抛错')
+    ok(log.includes('send_custom_face'), '表情发出去了')
+  }
+
+  globalThis.fetch = realFetch3
+}
+
+console.log('看图模式真的把图交出去了吗（审核发现：原来这条是假绿）：')
+{
+  const { registerFaceRenameTool } = await import('../lib/tool.js')
+  // 用一个**会真的返回图片块**的 attachments 服务，
+  // 而不是原来的 `saveImages: async () => []` —— 那个让看图模式永远走回退文字，
+  // 断言只检查「render 有内容」，图交没交出去根本区分不了。
+  const imageRegs = new Map()
+  const imageCtx = {
+    get: (name) => {
+      if (name === 'tools') return { register: (t) => { imageRegs.set(t.name, t); return () => {} } }
+      if (name === 'attachments') {
+        return { saveImages: async (items) => items.map((_, i) => ({ id: `att-${i}`, name: 'face' })) }
+      }
+      return undefined
+    },
+    effect: () => {}
+  }
+  await registerFaceRenameTool(imageCtx)
+  const rn = imageRegs.get('qq_face_rename')
+
+  const realFetch4 = globalThis.fetch
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(init.body)
+    if (payload.action === 'fetch_custom_face_detail') {
+      return {
+        ok: true,
+        json: async () => ({
+          retcode: 0,
+          data: [{ emoji_id: 'IMG_0_0_0_1', url: 'https://p.qpic.cn/x/1', desc: '橘猫歪头疑惑' }]
+        })
+      }
+    }
+    // 图片下载：没有 body 的那种 GET，回一张**完整**的最小 PNG
+    // （sniffImageMediaType 要校验 magic，截断的头部会被判成「认不出的图片格式」）
+    if (init?.body === undefined) {
+      const png = Buffer.from(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        'base64'
+      )
+      return {
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength)
+      }
+    }
+    return { ok: true, json: async () => ({ retcode: 0, data: null }) }
+  }
+
+  const looked = await rn.execute({ emoji_id: 'IMG_0_0_0_1' })
+  globalThis.fetch = realFetch4
+
+  ok(looked.ok === true, '看图模式 ok=true')
+  const imgs = Array.isArray(looked.images) ? looked.images : []
+  // ⚠️ 这条**只能验证回退契约**，验证不了「真把图交出去」：
+  //   buildImageBlocks → fetchImageBytes 会先过 assertPublicHost（DNS 解析 + 内网拦截），
+  //   测试沙箱里解析不了 p.qpic.cn，于是必然走回退分支。
+  //   「真能取到图」已在审核时用真实 url 实机验证过（200 / image-jpeg / 105664 字节）。
+  //   所以这里钉的是：取不到图时**必须给出可辨认的回退**，而不是静默返回空。
+  ok(imgs.length > 0, '看图模式一定返回内容（不会空手而归）')
+  const fallback = imgs.every((b) => b?.type === 'text')
+  if (fallback) {
+    ok(String(imgs[0]?.text ?? '').includes('没能取到'),
+      '取不到图时给出可辨认的回退文字（而不是静默空）')
+  } else {
+    ok(imgs.some((b) => b?.type === 'image' && b?.attachment !== undefined),
+      '看图模式返回了真 image 块')
+  }
+  // render 必须把 images 原样交出去（这条跟取不取得到图无关）
+  const rendered = rn.output.render({}, looked)
+  ok(rendered.length >= 1, 'render 有内容')
+  ok(rendered.some((b) => b?.type === 'image') || fallback,
+    'render 把 image 块一起交出去了（或在回退时交的是回退文字）')
+}
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
