@@ -228,5 +228,24 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   ok(entry !== null && entry.countToday === 1, '跨天计数：昨天 2 次不计入今天，今天从 1 开始')
 }
 
+// ---- 空闲基准：自己刚主动过，也要从「上次主动」重新等满 idleHours ----
+// 之前的 bug：基准只看 lastIncomingAt，主动说完它不动，于是 60 秒后下一 tick
+// 依然算「空闲够了」——静默一解除就一分钟一条，几分钟把当日额度烧光。
+{
+  const r = shouldNudge({
+    ...base,
+    dailyMax: 6, // 别让配额先把它拦下，这条要验的是「空闲」那一道
+    entry: {
+      lastIncomingAt: NOW - 8 * HOUR,
+      lastProactiveAt: NOW - 60 * 1000,
+      unanswered: 0,
+      day: dayKey(NOW),
+      countToday: 1
+    }
+  })
+  ok(r.ok === false && r.reason === 'not-idle-enough', '刚主动过 1 分钟 → 空闲不够，不能再开口')
+  ok(r.eligibleAt === NOW - 60 * 1000 + 6 * HOUR, '起算点是「上次主动」，不是「上次来信」')
+}
+
 console.log(`\n${passed} 过 ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
