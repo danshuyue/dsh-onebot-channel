@@ -32,6 +32,8 @@ process.on('exit', () => {
 const GROUP = '975663147'
 const PEER = '3472302240'
 const SELF = '3655191092'
+/** 群里第三个号：用来测「夹在队列消息之间、但没进队列」的上下文。 */
+const STRANGER = '1742196292'
 const SESSION = 'session-window-batch-test'
 
 writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
@@ -357,9 +359,8 @@ console.log('@ 之前先投递积压的续聊：')
 
   // A2. 轮询路径的形状：`sinceSeqOverride` 是**这一批消息开始前**的旧快照。
   //     真实轮询里 `pollGroup` 先取 baseDeliveredSeq 再逐条处理，所以那条 @ 拿到的
-  //     基准比 pending 里那些消息的 seq 更老 —— 光靠 `lastDeliveredSeq` 抬不起来，
-  //     必须把基准抬到刚投那批的 maxSeq，旧话才不会在 @ 正文里再露一遍。
-  //     （审核式变异发现：不做这条，把「抬基准」整句删掉测试照样全绿。）
+  //     基准比 pending 里那些消息的 seq 更老。
+  //     （审核式变异发现：不做这条，把「剔除已投那批」整段删掉测试照样全绿。）
   await resetWindow()
   const oldBase = 60 // 这一批开始处理之前的基准
   const a2 = [
@@ -370,8 +371,21 @@ console.log('@ 之前先投递积压的续聊：')
   const a2Result = await handleGroupMessage(ctx, GROUP, at(PEER, 607, 67, 'A2 的 @'), a2.slice(), oldBase)
   ok(a2Result.status === 'delivered', '旧基准场景：@ 照常投递')
   ok(delivered.length === 2 && bodyOf(0).includes('A2 第一句续聊'), '旧基准场景：积压批次先投')
-  ok(!bodyOf(1).includes('A2 第一句续聊'), '旧基准场景：@ 正文里不再重复那批旧话（基准已被抬到批次 maxSeq）')
+  ok(!bodyOf(1).includes('A2 第一句续聊'), '旧基准场景：@ 正文里不再重复那批旧话（已按身份剔除）')
   ok(!bodyOf(1).includes('[这段时间的群聊]'), '旧基准场景：@ 正文里没有重复的上下文块')
+  // 但「夹在队列消息之间、没进队列」的消息必须留下 —— 她没看过它，那是有效上下文。
+  // 这正是「按身份剔除」而不是「把基准抬到批次 maxSeq」的理由：后者按 seq 区间过滤，
+  // 会把这条一起删掉（丢消息）。
+  await resetWindow()
+  const skippedOne = msg(STRANGER, 608, 68, '夹在中间但没进队列的一句')
+  queueWindowMessage(GROUP, msg(PEER, 609, 69, '队列里的第一句'))
+  queueWindowMessage(GROUP, msg(PEER, 610, 70, '队列里的第二句'))
+  const mixedHistory = [skippedOne, ...windowMessages(GROUP)]
+  const mixed = await handleGroupMessage(ctx, GROUP, at(PEER, 611, 71, '夹杂场景的 @'), mixedHistory, 60)
+  ok(mixed.status === 'delivered', '夹杂场景：@ 照常投递')
+  const mixedBody = bodyOf(delivered.length - 1)
+  ok(!mixedBody.includes('队列里的第一句'), '夹杂场景：队列里投过的那批不再重复')
+  ok(mixedBody.includes('夹在中间但没进队列的一句'), '夹杂场景：没进队列的群友发言仍作为上下文保留（不误删）')
 
   // B. 零开销：队列空时 @ 不产生额外的 followup。
   await resetWindow()
