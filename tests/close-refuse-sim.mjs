@@ -389,5 +389,135 @@ console.log('出站防线：被拒回合的正文不转发：')
   outbound.clear()
 }
 
+// ---------------------------------------------------------------------------
+// 7. qq_skip：「这条不该有回复」的无副作用出口（0.16.16）
+//
+// 用户实测的根因：她判断出不用回时**没有无副作用的出口** ——
+// 只调 qq_pass 时「正文写了真话仍照发」，什么都不调时正文会被自动转发。
+// 于是最省事的路变成「写一句解释我为什么不说」，那段解释真被发出去了。
+// ---------------------------------------------------------------------------
+console.log('qq_skip：「判断不用回」时正文必须真的不发：')
+{
+  const { registerSkipTool } = await import('../lib/tool.js')
+  const { outbound, enqueueOutbound, flushOutbound } = await import('../lib/outbound.js')
+
+  await registerSkipTool(toolCtx)
+  const skip = regs.get('qq_skip')
+  ok(skip !== undefined, 'qq_skip 注册上了')
+
+  const sent = []
+  const realFetch2 = globalThis.fetch
+  globalThis.fetch = async (_url, init) => {
+    const payload = JSON.parse(init.body)
+    if (payload.action === 'send_private_msg' || payload.action === 'send_group_msg') sent.push(payload)
+    return { ok: true, json: async () => ({ retcode: 0, data: { message_id: 2000 + sent.length } }) }
+  }
+  const fakeAgent2 = (events) => ({ session: { snapshotEvents: () => events } })
+
+  // --- A. qq_skip 之后，正文一律不发（哪怕它看起来像"真话"）---
+  {
+    sent.length = 0
+    outbound.clear()
+    // 这一回合她写了一句"判断"——正是用户看到的现象
+    const result = await skip.execute({ user_id: '777', why: '话题收尾了' })
+    ok(result.ok === true, 'qq_skip 返回 ok')
+    ok(String(result.note).includes('什么都不发'), '返回值说清楚了「什么都不发」')
+
+    const events = [
+      { seq: 1, type: 'user/message', data: {} },
+      { seq: 2, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这条不用回了，对方好像想结束话题' }] } } },
+      { seq: 3, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-SK', fakeAgent2(events), 0, { kind: 'private', id: '777' })
+    await flushOutbound()
+    ok(sent.length === 0, `qq_skip 回合的正文【不】转发（实际发了 ${sent.length} 条）`)
+    ok(outbound.size === 0, '被跳过的回合正常出队，不堵后面')
+  }
+
+  // --- B. 没有 qq_skip 的回合，正文照发（不能拦过头）---
+  {
+    sent.length = 0
+    outbound.clear()
+    const events = [
+      { seq: 1, type: 'user/message', data: {} },
+      { seq: 2, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '好呀，那我等你' }] } } },
+      { seq: 3, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-NO', fakeAgent2(events), 0, { kind: 'private', id: '888' })
+    await flushOutbound()
+    const body = sent.map((m) => JSON.stringify(m.params ?? {})).join('|')
+    ok(sent.length > 0 && body.includes('我等你'), '没调 qq_skip 的回合，正文照常转发')
+  }
+
+  // --- C. qq_skip 是**一次性**的：吃掉一次就没了，不能把下一回合也吞掉 ---
+  {
+    sent.length = 0
+    outbound.clear()
+    await skip.execute({ user_id: '999', why: '第一次' })
+    // ⚠️ 必须分两次 flush：同一个 queue 里塞两个条目会让 sentTurns 去重，
+    //    两个条目认到同一个 turn/end —— 那样测的就不是「第二个回合」了。
+    const turn1 = [
+      { seq: 1, type: 'user/message', data: {} },
+      { seq: 2, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一回合的判断' }] } } },
+      { seq: 3, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-ONE', fakeAgent2(turn1), 0, { kind: 'private', id: '999' })
+    await flushOutbound()
+    ok(sent.length === 0, '第一回合被 qq_skip 跳过（一条都没发）')
+
+    // 第二回合：同一个 target，但**没再调** qq_skip
+    sent.length = 0
+    const turn2 = [
+      { seq: 4, type: 'user/message', data: {} },
+      { seq: 5, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第二回合真回了一句' }] } } },
+      { seq: 6, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-ONE', fakeAgent2(turn2), 0, { kind: 'private', id: '999' })
+    await flushOutbound()
+    const body = sent.map((m) => JSON.stringify(m.params ?? {})).join('|')
+    // ⚠️ 这条必须断言「第二回合的话真的发出去了」——
+    //    第一版我写的是 `!includes(第二句) || sent.length > 0`，用 or 连起来永远为真，
+    //    把「一次性消费」那个变异整条删掉测试照样全绿（自查发现）。
+    ok(body.includes('第二回合真回了一句'), '第二回合没被上一个 qq_skip 吞掉（标志是一次性消费的）')
+  }
+
+  // --- D. qq_skip 不影响已经用 qq_send 发出去的话 ---
+  {
+    sent.length = 0
+    outbound.clear()
+    await skip.execute({ user_id: '1234', why: '不用回' })
+    const events = [
+      { seq: 1, type: 'user/message', data: {} },
+      {
+        seq: 2,
+        type: 'tool/call',
+        data: { name: 'qq_send', callId: 'call-ok' }
+      },
+      { seq: 3, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '我发过的那句话' }] } } },
+      { seq: 4, type: 'turn/end', data: { reason: { kind: 'stop' } } }
+    ]
+    enqueueOutbound('session-SENT', fakeAgent2(events), 0, { kind: 'private', id: '1234' })
+    await flushOutbound()
+    // qq_send 那一路是自己发的，不经过 flushOutbound；这里只断言自动转发被拦
+    ok(sent.length === 0, 'qq_skip 回合里，自动转发这一路仍然被拦住（qq_send 不受影响，那条不走这里）')
+  }
+
+  // --- E. qq_skip 之后 qq_close 可以放行（它是「已处理过」）---
+  {
+    getState().windows = {}
+    getState().groups = { [GROUP]: { lastSeq: 10, lastDeliveredSeq: 10 } }
+    openWindow(GROUP, PEER)
+    clearCloseRefusals(GROUP)
+    resetTurnHandledFor(`group:${GROUP}`)
+    theirLast = '为什么啊'
+    await skip.execute({ group_id: GROUP, why: '这条不用回' })
+    const closed = await close.execute({ group_id: GROUP })
+    ok(closed.ok === true, 'qq_skip 之后 qq_close 也能放行（都算"处理过了"）')
+  }
+
+  globalThis.fetch = realFetch2
+  outbound.clear()
+}
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)

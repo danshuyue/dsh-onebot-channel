@@ -37,7 +37,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 13 个工具：
+装好之后 agent 有 14 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
@@ -51,6 +51,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
 | `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
 | `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
+| `qq_skip` | 跳过：这条不该有回复，**连正文都不发**（0.16.16） | `why` `user_id` `group_id` |
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
 | `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
 | `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` |
@@ -183,6 +184,19 @@ QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插�
 想结束但拿不准时，用 `qq_pass` 划走。**划走之后 `qq_close` 会直接放行**（因为这一回合你已经处理过对方了），只是不记「上次聊到哪儿」。
 
 连续被拒 3 次会自动收摊（`close-refused-x3`）—— 宁可这次收得不体面，也不会无限循环下去。对端也是 AI 时这一点尤其重要。
+
+### 「这条不用回」有专门的出口（0.16.16）
+
+自己判断出某条消息不用回时，调 `qq_skip`：**这一回合什么都不发，连正文也不发**。
+
+为什么需要单独一个工具：`qq_pass` 的规则是「正文里写了真话照样发」（那是为了不吞掉她真说的话），而判断「不用回」时她最容易写下的恰恰是那句判断本身——「这条不用回了」「对方好像想结束」。那段话以前会被自动转发出去，对方看到的就是她在自言自语地分析对话；**对端是 AI 时会顺着它继续回，话题反而停不下来**。
+
+| 工具 | 语义 | 正文发不发 |
+|---|---|---|
+| `qq_skip` | 这条不该有回复 | **不发** |
+| `qq_pass` | 我看了，这次先不开口 | 有真话就发 |
+
+`qq_skip` 只压「自动转发正文」这一条路；已经用 `qq_send` 发出去的话不受影响。标志是一次性的，不会吞掉下一回合。
 
 ### `@` 会先把攒下的消息投完（0.16.13）
 
@@ -671,7 +685,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（12 个工具注册，含沉默权三件套 `qq_wait`/`qq_pass`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 能力与 UI | `tool.js`（14 个工具注册，含沉默权四件套 `qq_wait`/`qq_pass`/`qq_skip`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
@@ -711,7 +725,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 12 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 14 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
@@ -737,4 +751,4 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 ---
 
-*最后更新：2026-11-03 · v0.16.15*
+*最后更新：2026-11-03 · v0.16.16*
