@@ -212,12 +212,14 @@ reply + at + text   ← 原样
 | 闸 | 默认 | 配置 |
 |---|---|---|
 | 静默时段 | 23:00–08:00 不打扰 | `proactiveQuietFrom` / `proactiveQuietTo` |
-| 空闲够久 | 6 小时 | `proactiveIdleHours` |
+| 空闲够久 | 6 小时（可设区间随机） | 下限 `proactiveIdleHours`，上限 `proactiveIdleMaxHours`（0 = 不随机，固定用下限） |
 | 当日配额 | 1 次 | `proactiveDailyMax` |
 | 没被回应的退避 | 2ⁿ 倍，封顶 4 倍 | `proactiveBackoffMax` |
 
 > 配额按**自然日**算：跨过零点，昨天的次数不再计入，设置页的「今天几次」也随之归零（0.11.1 修；之前的版本只更新日期不清计数，数字会一直涨）。
 >
+> 空闲门槛可以是一个**区间**：把 `proactiveIdleMaxHours` 填得比下限大（比如 1.5 ~ 2 小时），
+> 每段安静期开始时摇一次号，决定这次要等多久 —— 不会每次都精确卡在同一分钟，也不会每 60 秒重新摇。
 > 「空闲够久」的起算点是**上次来信和上次主动里较晚的那个** —— 她自己刚说完一句，也要重新等满这个时长。
 > 之前只按「你上次说话」算，于是静默时段一结束就一分钟一条，几分钟把当日额度烧光（已修，并补了回归用例）。
 
@@ -281,7 +283,7 @@ reply + at + text   ← 原样
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
 | **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条） |
-| **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
+| **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛（下限）、`proactiveIdleMaxHours` 空闲上限、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
 | **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、正文前缀、图片副本目录、只在 @ 时响应、冷启动会话、说说必须带 `confirm` |

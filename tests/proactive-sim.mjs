@@ -11,7 +11,7 @@ import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge,
+  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge, rollBetween,
   notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE, flushPersist,
   targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
@@ -255,6 +255,33 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   ok(text.includes('现在是 2026-10-29 14:00'), '内部来信里写清了当前时间')
   ok(text.includes('距上次说话已经 7 小时'), '仍然保留「距上次说话多久」')
   ok(text.includes('qq_pass'), '仍然保留了「可以不说」的出口')
+}
+
+// ---- 空闲门槛随机区间（1.5~2 小时这类） ----
+{
+  // 摇号本身的边界
+  const rolled = rollBetween(1.5, 2, NOW)
+  ok(rolled >= 1.5 && rolled < 2, '摇出来的值落在区间里')
+  ok(rollBetween(1.5, 2, NOW) === rolled, '同一个 seed 摇到同一个值（不会每 60 秒变门槛）')
+  ok(rollBetween(2, 1.5, NOW) === 2, '上限小于下限时退化成固定值')
+  const spread = new Set([0, 1, 2, 3, 4, 5].map((i) => rollBetween(1.5, 2, NOW + i * 3600 * 1000).toFixed(3)))
+  ok(spread.size >= 5, '相邻安静期能摇出不同的门槛（真的在随机）')
+
+  // 判定里用它：门槛必须在 [min,max] 之间
+  const entry = { lastIncomingAt: NOW - 1.7 * HOUR, unanswered: 0, day: dayKey(NOW), countToday: 0 }
+  const r = shouldNudge({
+    ...base,
+    dailyMax: 6,
+    idleHours: 1.5,
+    idleMaxHours: 2,
+    entry
+  })
+  const waitHours = (r.eligibleAt - (NOW - 1.7 * HOUR)) / HOUR
+  ok(waitHours >= 1.5 && waitHours <= 2, `门槛落在区间内（实际 ${waitHours.toFixed(3)} 小时）`)
+  const again = shouldNudge({ ...base, dailyMax: 6, idleHours: 1.5, idleMaxHours: 2, entry })
+  ok(again.eligibleAt === r.eligibleAt, '同一段安静期里重复判定结果一致')
+  const fixed = shouldNudge({ ...base, dailyMax: 6, idleHours: 1.5, idleMaxHours: 0, entry })
+  ok(Math.abs(fixed.eligibleAt - (NOW - 1.7 * HOUR + 1.5 * HOUR)) < 1, '上限填 0 → 退回固定用下限')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
