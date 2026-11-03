@@ -134,6 +134,7 @@ for (const [key, label] of [
   ['mergeMaxWaitMs', '合并上限'],
   ['proactiveEnabled', '主动搭话开关'],
   ['proactiveIdleHours', '主动搭话的空闲门槛'],
+  ['proactiveIdleMaxHours', '主动搭话的空闲上限（摇号区间）'],
   ['proactiveQuietFrom', '静默时段'],
 ]) {
   ok(new RegExp(`['"]${key}['"]`).test(clientSrc), `设置页有「${label}」（${key}）`)

@@ -228,5 +228,73 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   ok(entry !== null && entry.countToday === 1, '跨天计数：昨天 2 次不计入今天，今天从 1 开始')
 }
 
+// ---------------------------------------------------------------------------
+// 从上游 0.15.2 搬来的三处修复（0.16.18）
+// ---------------------------------------------------------------------------
+console.log('上游修复 · rollBetween 摇号：')
+{
+  const { rollBetween } = await import('../lib/proactive.js')
+  const a = rollBetween(2, 6, 12345)
+  const b = rollBetween(2, 6, 12345)
+  ok(a === b, `同一个 seed 摇出同一个值（${a}）`)
+  ok(a >= 2 && a < 6, `结果落在 [2,6) 内（${a}）`)
+  // 相邻时间戳必须摇出不同的值 —— 只做 FNV 的话小数部分会挤在一起
+  const near = [1, 2, 3, 4, 5].map((s) => rollBetween(2, 6, s))
+  ok(new Set(near.map((n) => n.toFixed(4))).size >= 4, `相邻 seed 摇出的值足够分散（${near.map((n) => n.toFixed(2)).join(', ')}）`)
+  ok(rollBetween(5, 3, 1) === 5, 'max <= min 时退回 min（配置写反不会崩）')
+  ok(rollBetween(2, 6, 'abc') >= 2, 'seed 是字符串也能用')
+}
+
+console.log('上游修复 · 空闲起算点（她刚说完不该立刻又能开口）：')
+{
+  const now = Date.now()
+  const base = {
+    enabled: true, idleHours: 6, dailyMax: 5,
+    quietFrom: '', quietTo: '', backoffMax: 1, now
+  }
+  // 对方 8 小时前说过话（远超 6 小时门槛），但她**1 分钟前刚主动说过**
+  const entry = {
+    lastIncomingAt: now - 8 * 3600 * 1000,
+    lastProactiveAt: now - 60 * 1000,
+    day: null, countToday: 0, unanswered: 0
+  }
+  const r = shouldNudge({ ...base, entry })
+  // 旧实现只看 lastIncomingAt → 算作「已空闲 8 小时」→ 放行 → 一分钟一条把额度烧光
+  ok(r.ok === false, `她刚主动说完之后【不】立刻再开口（ok=${r.ok} reason=${r.reason}）`)
+  ok(r.reason === 'not-idle-enough' || r.reason === 'backoff', `拦下的理由说得清（${r.reason}）`)
+
+  // 反过来：她很久没主动、对方也很久没说话 → 应该放行
+  const quiet = { lastIncomingAt: now - 9 * 3600 * 1000, lastProactiveAt: now - 9 * 3600 * 1000, day: null, countToday: 0, unanswered: 0 }
+  ok(shouldNudge({ ...base, entry: quiet }).ok === true, '真的安静了 9 小时就正常放行（没拦过头）')
+}
+
+console.log('上游修复 · 摇号区间 idleMaxHours：')
+{
+  const now = Date.now()
+  const base = {
+    enabled: true, idleHours: 2, idleMaxHours: 6, dailyMax: 5,
+    quietFrom: '', quietTo: '', backoffMax: 1, now
+  }
+  // 同一个 anchor，多次调用应给出同一个 eligibleAt（不会每 60 秒变）
+  const entry = { lastIncomingAt: now - 3 * 3600 * 1000, lastProactiveAt: 0, day: null, countToday: 0, unanswered: 0 }
+  const r1 = shouldNudge({ ...base, entry })
+  const r2 = shouldNudge({ ...base, entry })
+  ok(r1.eligibleAt === r2.eligibleAt, '同一次安静期内门槛固定（不会每 60 秒重摇）')
+  // 门槛必须落在 [2h, 6h] 区间内
+  const gapHours = (r1.eligibleAt - entry.lastIncomingAt) / 3600000
+  ok(gapHours >= 2 - 0.01 && gapHours <= 6 + 0.01, `摇出的门槛在 [2,6] 小时内（${gapHours.toFixed(2)}h）`)
+  // idleMaxHours=0（默认）时退回固定值
+  const fixed = shouldNudge({ ...base, idleMaxHours: 0, entry })
+  ok(Math.abs((fixed.eligibleAt - entry.lastIncomingAt) / 3600000 - 2) < 0.01, 'idleMaxHours=0 时用固定门槛（不随机）')
+}
+
+console.log('上游修复 · formatClock：')
+{
+  const { formatClock } = await import('../lib/proactive.js')
+  const text = formatClock(new Date('2026-11-03T14:05:00').getTime())
+  ok(/^2026-11-03 14:05（周[一二三四五六日]）$/.test(text), `格式正确（${text}）`)
+  ok(text.includes('周'), '带星期几（周末和工作日说的话不一样）')
+}
+
 console.log(`\n${passed} 过 ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
