@@ -1,6 +1,6 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.16.19",
+  "version": "0.16.20",
   "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
   "keywords": [
     "dsh-plugin",
@@ -47,7 +47,7 @@
     }
   },
   "scripts": {
-    "test": "node tests/readme-sim.mjs && node tests/assert.mjs && node tests/deliver-mode-sim.mjs && node tests/tool-retry-sim.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/window-sim.mjs && node tests/window-batch-sim.mjs && node tests/forward-sim.mjs && node tests/forward-image-sim.mjs && node tests/forward-mutation.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs && node tests/archive-image-sim.mjs && node tests/reply-sim.mjs && node tests/at-sim.mjs && node tests/http-config-sim.mjs && node tests/collect-sim.mjs && node tests/face-pick-sim.mjs && node tests/close-refuse-sim.mjs && node tests/preview-sim.mjs && node tests/poke-sim.mjs && node tests/notice-sim.mjs",
+    "test": "node tests/readme-sim.mjs && node tests/assert.mjs && node tests/deliver-mode-sim.mjs && node tests/tool-retry-sim.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/window-sim.mjs && node tests/window-batch-sim.mjs && node tests/forward-sim.mjs && node tests/forward-image-sim.mjs && node tests/forward-mutation.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs && node tests/archive-image-sim.mjs && node tests/reply-sim.mjs && node tests/at-sim.mjs && node tests/http-config-sim.mjs && node tests/collect-sim.mjs && node tests/face-pick-sim.mjs && node tests/close-refuse-sim.mjs && node tests/preview-sim.mjs && node tests/poke-sim.mjs && node tests/notice-sim.mjs && node tests/turn-notice-sim.mjs && node tests/prompt-section-sim.mjs",
     "test:forward-card": "node tests/forward-sim.mjs && node tests/forward-mutation.mjs",
     "test:legacy": "node tests/group-context-sim.mjs; node tests/identity-sim.mjs; node tests/capability-sim.mjs; node tests/outbound-sim.mjs",
     "test:rhythm": "node tests/rhythm-sim.mjs",

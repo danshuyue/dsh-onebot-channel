@@ -10,7 +10,7 @@
  *   在副本上做变异，然后把 forward-sim 指到副本上跑。
  *   好处：源码零风险（哪怕脚本崩了也不会留下半改的文件）。
  */
-import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, copyFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, copyFileSync, openSync, closeSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -181,17 +181,30 @@ const MUTATIONS = [
 ]
 
 function runOne(testName) {
+  // ⚠️ 不能用 stdio: 'pipe'（2026-11-03 实测）：受限环境下子进程的管道会以 EPERM
+  //   失败，error.stdout 是空的 —— 于是 baseline 被读成 0 条失败、或者红得莫名其妙，
+  //   整个变异测试失去意义（维护索引 §4 坑 28 记的就是这一条）。
+  //   改成把子进程输出重定向到文件再读，绕开命名管道。
+  const log = join(SANDBOX, `out-${testName.replace(/\./g, '_')}.log`)
+  let fd
   try {
+    fd = openSync(log, 'w')
     execFileSync(process.execPath, [join(SANDBOX_TESTS, testName)], {
-      stdio: 'pipe',
-      encoding: 'utf8',
+      stdio: ['ignore', fd, fd],
       cwd: SANDBOX
     })
     return { failed: 0 }
-  } catch (error) {
-    const output = String(error.stdout ?? '') + String(error.stderr ?? '')
+  } catch {
+    let output = ''
+    try {
+      output = readFileSync(log, 'utf8')
+    } catch {
+      return { failed: 1 }
+    }
     const failed = (output.match(/✗/g) ?? []).length
     return { failed: failed === 0 ? 1 : failed }
+  } finally {
+    if (fd !== undefined) try { closeSync(fd) } catch {}
   }
 }
 

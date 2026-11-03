@@ -35,6 +35,32 @@ dsh plugin --profile desktop add dsh-onebot-channel
 **前置条件**：需要先跑一个 OneBot 11 协议端，并把插件的 `onebotHttp` / `token` 指过去。
 插件不读你的 QQ 密码，只跟协议端说话。
 
+## 她不会让你干等（2026-11-03）
+
+两条互补的机制，解决「消息发出去半天没动静」：
+
+**① 要干活时先出一声（提示词层）。** 插件注册一段常驻系统段落，告诉她：
+判断这一条需要长作业（读文件、跑命令、多步推进）时，**先 `qq_send` 一句**再埋头干。
+普通聊天不受影响 —— 每句都加「稍等我看看」只会啰嗦。
+
+> 常驻意味着**不用每个新会话手动贴 `docs/QQ对话说明.md`**；它不进会话历史、
+> 不占对话 token，重启后仍在。宿主没有 `systemPrompt` 服务时自动跳过，不影响收发。
+
+**② 真出故障时插件替它说话（代码层）。** 这些情况 QQ 那头原本一个字都收不到：
+
+| 情形 | 插件做什么 |
+|---|---|
+| 回合以 `reason.kind === 'error'` 收尾（接口报错 / 上下文超限） | 发一条带 `[系统]` 的通知：「她的回复没能发出来，可以再发一条」 |
+| 崩溃后被补了 `interrupted` 收尾 | 同上 |
+| 等满 `outboundEntryTtlMs` 仍没有 `turn/end`，**但 agent 还在跑** | 说一句「还在处理」，并**保留这条回复**继续等（最多 2 次，之后按丢失处理） |
+| 等满 TTL 且 agent 已经不跑了 | 明说「中断了，没能发出来」，丢弃条目免得堵住后续转发 |
+
+**绝不误报的沉默**：`aborted` 一律不通知 —— 你自己点了停止、DSH 正在卸载、
+上层编排取消，那些都是「有意为之」，不是故障。发错一条比少发一条更糟。
+
+通知走 `callOneBot` 唯一出口，所以**白名单照旧生效**，不会因为「这是系统通知」就发给白名单外的号。
+同一个目标 60 秒内只播一条（接口连着挂时不刷屏），每个队列条目每种类型也只播一次。
+
 ## 工具
 
 装好之后 agent 有 14 个工具：
@@ -701,15 +727,15 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-42 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+44 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
-| 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（14 个工具注册，含沉默权四件套 `qq_wait`/`qq_pass`/`qq_skip`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `notice.js`（回合中断时替插件说一句带 `[系统]` 的话） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
+| 能力与 UI | `tool.js`（14 个工具注册，含沉默权四件套 `qq_wait`/`qq_pass`/`qq_skip`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
