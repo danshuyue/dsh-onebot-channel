@@ -49,7 +49,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_face_pick` | 按情绪/场景**挑**收藏表情，只列候选不发送（0.16.14） | `query` `limit` |
 | `qq_face_rename` | 看图给收藏表情**改名**成「名称 \| 情绪词」（0.16.14） | `emoji_id` `desc` |
 | `qq_qzone_post` | 发表 QQ 空间说说（**必须带 `confirm: true`**） | `content` `visibility` `target_uins` `confirm` |
-| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，上限 60s） | `ms` `user_id` `group_id` |
+| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，单次上限 60s，另有**单回合累计上限** `waitTurnMaxMs`） | `ms` `user_id` `group_id` |
 | `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
 | `qq_skip` | 跳过：这条不该有回复，**连正文都不发**（0.16.16） | `why` `user_id` `group_id` |
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
@@ -197,6 +197,18 @@ QQ 的「拍一拍」是一种**比消息轻得多**的叫你一声。以前插�
 | `qq_pass` | 我看了，这次先不开口 | 有真话就发 |
 
 `qq_skip` 只压「自动转发正文」这一条路；已经用 `qq_send` 发出去的话不受影响。标志是一次性的，不会吞掉下一回合。
+
+### 忙的时候不再排队：改用 steer（0.16.19）
+
+用户实测：「会卡排队。排队的消息都是旧的，因为本次会话其实正常的推进且持续回复。」「表现为 `qq_wait` 和 `qq_msg_history` 交替工作……而 @ 触发进入了队列中进行排队。」
+
+根因在宿主那一侧的两个队列上——`followup` 进 **`next-turn`**，只在**回合边界**被认领、**一次只认领一条**；`steer` 进 **`next-step`**，当前回合的下一个步骤边界就认领、**整队全取**。
+
+而插件原来只有一条路：`agent.followup()`。她一个回合里 `qq_wait` 40 秒、翻历史、分条发好几条，这期间进来的每条消息都只能排队，回合结束后**一条开一个新回合**——等轮到它们时早就是旧话，而且她**已经在当前回合里用 `qq_msg_history` 看过这几条了**，于是对着同一段话再回一遍。
+
+现在按 agent 状态分流：**忙 → `steer`（插进当前回合的下一步），闲 → `followup`（行为与改动前逐字一致）**。宿主没有 `status` / `steer` 时自动退回 `followup`，不丢消息。
+
+配套：`waitTurnMaxMs`（默认 60 秒，0 = 不限）限制**一个回合里 `qq_wait` 的累计时长**——回合长度是排队问题的上游，只夹「单次」不够（她可以连打四次 40 秒）。额度按 QQ 号/群记，**每次有新消息投给她就重置**；用完了不报错，`qq_wait` 立刻返回当前情况并提示「现在开口，或者收掉这一轮」。
 
 ### 投递队列的 8 个顺序缺陷（0.16.17）
 
@@ -401,7 +413,7 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话、正文前缀 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限（单次）、`waitTurnMaxMs` 单回合等待总量（0 = 不限）、`closureEnabled` 允许判断收尾、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |

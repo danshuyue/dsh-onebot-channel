@@ -127,6 +127,7 @@ ok(staleWhite.length === 0, `白名单里没有已删除的键${staleWhite.lengt
 for (const [key, label] of [
   ['replyQuietMs', '回复前静默'],
   ['waitMaxMs', '等待上限'],
+  ['waitTurnMaxMs', '单回合等待总量'],
   ['closureEnabled', '判断收尾'],
   ['memoryEnabled', '关系记忆开关'],
   ['backfillOnStart', '上线补历史'],
