@@ -63,11 +63,11 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 14 个工具：
+装好之后 agent 有 15 个工具：
 
 | 工具 | 干什么 | 参数 |
 |---|---|---|
-| `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at` | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` |
+| `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at`；想发**语音**就传 `voice`（本机音频路径） | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` `voice` |
 | `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
 | `qq_msg_history` | 查群 / 好友历史消息（**返回的图能看见**，0.12.0） | `group_id` `user_id` `count` `before_message_id` |
 | `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` |
@@ -81,6 +81,7 @@ dsh plugin --profile desktop add dsh-onebot-channel
 | `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
 | `qq_remember` | 记住关于他的一件事 / 一个称呼，下次还认得 | `fact` `nick` `user_id` `group_id` |
 | `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` |
+| `qq_voice` | 把一条语音转成文字（`[语音]` 只是占位，听不到内容；0.17.1） | `message_id` |
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -727,7 +728,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-44 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+46 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
@@ -735,7 +736,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `notice.js`（回合中断时替插件说一句带 `[系统]` 的话） `split.js`（分条） `title.js`（会话标题） `history.js`（消息历史检索） |
-| 能力与 UI | `tool.js`（14 个工具注册，含沉默权四件套 `qq_wait`/`qq_pass`/`qq_skip`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 能力与 UI | `tool.js`（15 个工具注册，含沉默权四件套 `qq_wait`/`qq_pass`/`qq_skip`/`qq_close` 与 `qq_remember`、`qq_poke`、`qq_face_pick`、`qq_voice`） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：本机音频 → 协议端上传 → record 段） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（发说说） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
@@ -775,7 +776,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 14 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 注册 15 个工具、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。
