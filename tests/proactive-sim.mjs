@@ -250,7 +250,12 @@ console.log('上游修复 · 空闲起算点（她刚说完不该立刻又能开
   const now = Date.now()
   const base = {
     enabled: true, idleHours: 6, dailyMax: 5,
-    quietFrom: '', quietTo: '', backoffMax: 1, now
+    // ⚠️ 想表达「不静默」不能用空串（2026-11-05 实测踩到）：
+    //   minutesOf('', fallback) 里空串**解析失败**，会回落到默认的 23:00–08:00，
+    //   于是「深夜跑测试」时这组用例被 quiet-hours 拦下，报一堆看起来像功能坏了的红。
+    //   这个测试原本就写在别的时段跑，看不出问题 —— 属于「时间依赖的假绿/假红」。
+    //   正确写法：from === to 才表示不静默（inQuietHours 的约定），用 '00:00','00:00'。
+    quietFrom: '00:00', quietTo: '00:00', backoffMax: 1, now
   }
   // 对方 8 小时前说过话（远超 6 小时门槛），但她**1 分钟前刚主动说过**
   const entry = {
@@ -273,7 +278,8 @@ console.log('上游修复 · 摇号区间 idleMaxHours：')
   const now = Date.now()
   const base = {
     enabled: true, idleHours: 2, idleMaxHours: 6, dailyMax: 5,
-    quietFrom: '', quietTo: '', backoffMax: 1, now
+    // 同上一组：空串会回落到默认 23:00–08:00，深夜跑必红。'00:00','00:00' 才是「不静默」。
+    quietFrom: '00:00', quietTo: '00:00', backoffMax: 1, now
   }
   // 同一个 anchor，多次调用应给出同一个 eligibleAt（不会每 60 秒变）
   const entry = { lastIncomingAt: now - 3 * 3600 * 1000, lastProactiveAt: 0, day: null, countToday: 0, unanswered: 0 }

@@ -342,6 +342,26 @@ console.log('\n7. qq_send 的 voice 参数接好了：')
   await tool.execute({ text: '没有 exec 的消息', user_id: '1321833118' })
   ok(focus.sessionOfSent('-777002') === null, '★ 取不到 exec.agent.session 时不记索引（绝不瞎记一个 id）')
 
+  // ③ ★★ 不传 user_id 时，索引的 targetKey 必须落到实际收件人（2026-11-05 线上实测踩到）
+  //
+  //   线上现象：她发消息时没传 user_id（默认发给本人），target 是 { kind:'private' } —— **id 为空**，
+  //   于是 targetKey 记成 `private:`。用户引用那条消息时，查询侧算的是 `private:1321833118`，
+  //   两者不等 → 日志写「引用 xxx 属于 private:，与当前 private:1321833118 不符，不跨 target 搬运」
+  //   → 静默回落到默认绑定会话。这个 bug 光测「记没记」是抓不到的，
+  //   必须断言 **key 的内容**。
+  focus.clearSent()
+  sendReply = { retcode: 0, data: { message_id: -777004 } }
+  await tool.execute(
+    { text: '不传 user_id 的消息' },
+    { agent: { session: { header: { id: 'session-current-workspace' } } } }
+  )
+  const noIdHit = focus.sessionOfSent('-777004')
+  ok(noIdHit !== null, '不传 user_id 时也记了索引')
+  ok(
+    noIdHit?.targetKey === 'private:1321833118',
+    `★★ 不传 user_id 时 targetKey 落到实际收件人而不是 private:（实际 ${JSON.stringify(noIdHit?.targetKey)}）`
+  )
+
   // ③ session.id 的另一种形状（没有 header）也要认
   focus.clearSent()
   sendReply = { retcode: 0, data: { message_id: -777003 } }
