@@ -11,7 +11,7 @@
  * ⚠️ 必须在隔离 HOME 下跑（会写 qq-bridge-state.json）：
  *   node tests/run-isolated.mjs tests/focus-sim.mjs
  */
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -206,25 +206,41 @@ async function main() {
   r = focus.resolveSession({ cfg: getConfig(), kind: 'private', id: PEER })
   eq(r.via, 'default', '/回 之后回到默认绑定')
 
-  // ---- 15. 出站标签 ----
-  eq(focus.tagFor('session-default-peer', 'private', PEER, 'CMPOR·主分支'), '', '★ 默认会话不加标签（日常聊天不污染）')
+  // ---- 15. 出站标签（2026-11-05 方向修正：标签加在**她发给用户的话**上）----
+  // ⚠️ 初版这里测的是 tagFor(sessionId, kind, id, label)，调用点却挂在 poll.js 的
+  //    **入站**路径上 —— 线上实测「发出去的消息一个标签都没有」，才发现方向反了。
+  //    所以这个函数现在叫 tagForSession，签名是 (sessionId, target, label)。
+  const PEER_T = { kind: 'private', id: PEER }
+  eq(focus.tagForSession('session-default-peer', PEER_T, 'CMPOR·主分支'), '', '★ 默认会话不加标签（日常聊天不污染）')
   eq(
-    focus.tagFor('session-other' === 'x' ? '' : 'session-not-default', 'private', PEER, 'CMPOR·主分支'),
+    focus.tagForSession('session-not-default', PEER_T, 'CMPOR·主分支'),
     '〔CMPOR·主分支〕',
     '★ 非默认会话加标签'
   )
-  eq(focus.tagFor('session-not-default', 'private', PEER, ''), '', '没有 label 时不加标签')
   writeConfig({ focusTagEnabled: false })
   config.loadConfig()
   archive.invalidateArchiveCache()
-  eq(focus.tagFor('session-not-default', 'private', PEER, 'CMPOR'), '', 'focusTagEnabled=false 时完全不加标签')
+  eq(focus.tagForSession('session-not-default', PEER_T, 'CMPOR'), '', 'focusTagEnabled=false 时完全不加标签')
   writeConfig()
   config.loadConfig()
   archive.invalidateArchiveCache()
 
+  // 不给 label 时会去反查（查不到就空 —— 绝不编一个名字出来）
+  eq(focus.tagForSession('session-not-default', PEER_T), '', '★ 反查不到标题时不加标签（不编名字）')
+
   // 标签长度上限
-  const longTag = focus.tagFor('session-x2', 'private', PEER, 'A'.repeat(100))
+  const longTag = focus.tagForSession('session-x2', PEER_T, 'A'.repeat(100))
   ok(longTag.length <= 24 + 2 + 1, '★ 标签被截断（不会把 100 字的标题塞进每条消息）')
+
+  // ---- 15b. 标签只在出站加：入站路径不该再调用它 ----
+  // 这是那个方向错误的回归防线。定向 grep 源码比跑行为更直接：
+  // 入站路径（poll.js）里不该再出现 tagForSession 的调用。
+  const pollSrc = readFileSync(new URL('../lib/poll.js', import.meta.url), 'utf8')
+  ok(!/tagForSession\s*\(/.test(pollSrc), '★★ poll.js（入站路径）里不再调用 tagForSession —— 标签只加在出站')
+  const outSrc = readFileSync(new URL('../lib/outbound.js', import.meta.url), 'utf8')
+  ok(/tagForSession\s*\(/.test(outSrc), '★ outbound.js（自动转发）确实加了出站标签')
+  const toolSrc = readFileSync(new URL('../lib/tool.js', import.meta.url), 'utf8')
+  ok(/tagForSession\s*\(/.test(toolSrc), '★ tool.js（qq_send）确实加了出站标签')
 
   // ---- 16. 持久化：焦点落盘后重新加载还在 ----
   focus.clearAll()
