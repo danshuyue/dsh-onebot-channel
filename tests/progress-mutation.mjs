@@ -14,6 +14,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, openSync, close
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeIsolatedTestMarker } from './sandbox-guard.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = join(HERE, '..')
@@ -87,8 +88,8 @@ const MUTATIONS = [
   {
     name: '编号表：过期也放行',
     file: 'lib/commands.js',
-    from: '    if (now - Number(table.at ?? 0) > TABLE_TTL_MS) return { ok: false, reason: \'expired\', max: table.entries.length }',
-    to: '    if (false) return { ok: false, reason: \'expired\', max: table.entries.length }',
+    from: '  if (now - Number(table.at ?? 0) > TABLE_TTL_MS) return { ok: false, reason: \'expired\', max: table.entries.length }',
+    to: '  if (false) return { ok: false, reason: \'expired\', max: table.entries.length }',
     expectRed: '★ 过期表查不到'
   },
   {
@@ -115,6 +116,7 @@ function runSim(workdir) {
         // 隔离 HOME：测试自己会在 $HOME/.dsh 下造假数据
         HOME: join(ROOT, 'home'),
         USERPROFILE: join(ROOT, 'home'),
+        DSH_TEST_HOME: join(ROOT, 'home'),
         TMPDIR: join(ROOT, 'home'),
         TEMP: join(ROOT, 'home'),
         TMP: join(ROOT, 'home')
@@ -143,6 +145,7 @@ function prepareCopy(tag) {
   mkdirSync(dir, { recursive: true })
   cpSync(join(PLUGIN, 'lib'), join(dir, 'lib'), { recursive: true })
   cpSync(join(PLUGIN, 'tests', 'progress-sim.mjs'), join(dir, 'tests', 'progress-sim.mjs'), { recursive: true })
+  cpSync(join(PLUGIN, 'tests', 'sandbox-guard.mjs'), join(dir, 'tests', 'sandbox-guard.mjs'), { recursive: true })
   writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'mutation-copy', type: 'module' }), 'utf8')
   return dir
 }
@@ -153,6 +156,8 @@ const problems = []
 
 try {
   mkdirSync(join(ROOT, 'home', '.dsh'), { recursive: true })
+  // progress-sim 会检查这个标记，确认自己跑在隔离 HOME 里（2026-11-06 事故后加的守卫）。
+  writeIsolatedTestMarker(join(ROOT, 'home'))
 
   // ---- 基线：未变异时必须绿 ----
   console.log('基线检查（未变异，应当绿）…')

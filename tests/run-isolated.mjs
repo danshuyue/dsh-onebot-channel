@@ -21,6 +21,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync, closeSync, openSync } f
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writeIsolatedTestMarker } from './sandbox-guard.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const PLUGIN = join(HERE, '..')
@@ -52,6 +53,9 @@ function pickRoot() {
 const HOME = pickRoot()
 const DATA = join(HOME, '.dsh')
 mkdirSync(DATA, { recursive: true })
+// 给隔离 HOME 打标记：破坏性测试（progress-sim 等）会验证这个标记，
+// 防止有人绕过本脚本直接跑测试、把真实 ~/.dsh 当沙箱（2026-11-06 事故）。
+writeIsolatedTestMarker(HOME)
 
 /** 够用的沙箱配置：群、私聊、路由都齐，免得被测模块自己判「未配置」直接跳过。 */
 const PEER = 1321833118
@@ -113,6 +117,7 @@ function runOne(script) {
         ...process.env,
         HOME,
         USERPROFILE: HOME,
+        DSH_TEST_HOME: HOME,
         TMPDIR: HOME,
         TEMP: HOME,
         TMP: HOME

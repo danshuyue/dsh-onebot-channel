@@ -5,13 +5,23 @@
  * 在这个 HOME 下造一批假的投影缓存 / 工作区注册表 / 会话日志 mtime，
  * 然后断言 progress.js 与 commands.js 的行为。
  *
- * ⚠️ 这个文件**不碰真实 ~/.dsh**：DATA_DIR 是 env.js 在 import 时按 HOME 算出来的，
- *   所以只要 HOME 被 run-isolated 改过，读写就都在临时目录里。
- *   直接 `node tests/progress-sim.mjs` 跑的话会碰真实目录 —— 别那么干。
+ * 🚨 破坏性测试：`reset()` 会删除 $HOME/.dsh/sessions、$HOME/.dsh/storages/session_projcache，
+ *   并把 $HOME/.dsh/storages/workspace.json 覆盖成 **version 1** 空表。
+ *   2026-11-06 有人直接 `node tests/progress-sim.mjs`，删掉了真实 ~/.dsh/sessions
+ *   （481 个会话 / 约 680 MB），并让 DSH NEXT 2.0.22 因 workspace v1≠v2 启动失败。
+ *
+ *   ⛔ 不要直接跑本文件。文件顶部的 assertIsolatedTestHome() 会拒绝真实 HOME，别绕过：
+ *      node tests/run-isolated.mjs tests/progress-sim.mjs
+ *      npm run test:progress
+ *   复盘：docs/事故复盘-2026-11-06-测试误删真实DSH目录.md
  */
 import { mkdirSync, rmSync, writeFileSync, utimesSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { assertIsolatedTestHome } from './sandbox-guard.mjs'
+
+// 先验证隔离 HOME，再计算 DATA_DIR、做任何写操作。
+assertIsolatedTestHome({ testFile: 'tests/progress-sim.mjs' })
 
 const HOME = homedir()
 const DATA = join(HOME, '.dsh')
