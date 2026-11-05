@@ -71,22 +71,50 @@ dsh plugin --profile desktop add dsh-onebot-channel
 
 ## 工具
 
-装好之后 agent 有 12 个工具。历史查询、说说发布和手动记忆工具按既有决定未注册：
+按**默认配置**注册 5 个工具（`qq_send` + 沉默权四件套）；其余 7 个按「工具箱」分档，默认不注册 ——
+它们仍然可用，只是要先去设置页打开那一档。历史查询、说说发布和手动记忆工具按既有决定未注册：
 
-| 工具 | 干什么 | 参数 |
-|---|---|---|
-| `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at`；想发**语音**就传 `voice`（必须位于设置的「语音产物目录」内） | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` `voice` |
-| `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` |
-| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` |
-| `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` |
-| `qq_face_pick` | 按情绪/场景**挑**收藏表情，只列候选不发送（0.16.14） | `query` `limit` |
-| `qq_face_rename` | 看图给收藏表情**改名**成「名称 \| 情绪词」（0.16.14） | `emoji_id` `desc` |
-| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，单次上限 60s，另有**单回合累计上限** `waitTurnMaxMs`） | `ms` `user_id` `group_id` |
-| `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` |
-| `qq_skip` | 跳过：这条不该有回复，**连正文都不发**（0.16.16） | `why` `user_id` `group_id` |
-| `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` |
-| `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` |
-| `qq_voice` | 把一条语音转成文字（`[语音]` 只是占位，听不到内容；0.17.1） | `message_id` |
+| 工具 | 干什么 | 参数 | 档位 / 默认 |
+|---|---|---|---|
+| `qq_send` | 发消息、发表情；想自己决定分几条就传 `segments`；想明确引用某条就传 `reply_to`；想 @ 人就传 `at`；想发**语音**就传 `voice`（必须位于设置的「语音产物目录」内） | `text` `segments` `emoji` `custom_emoji` `user_id` `group_id` `reply_to` `at` `voice` | **始终开启**（不可关） |
+| `qq_emoji_search` | 搜 QQ 官方表情目录 | `query` `all` | 表情包 · 默认关 |
+| `qq_collect_face` | 把收到的表情包存进 QQ 收藏夹（**动图 GIF 原样保留**） | `message_id` `image` `index` `recent` `file` `desc` `dir` `list` `delete` | 表情包 · 默认关 |
+| `qq_face_preview` | **看**收到的表情包（结果直接带图片） | `index` `from` `count` | 表情包 · 默认关 |
+| `qq_face_pick` | 按情绪/场景**挑**收藏表情，只列候选不发送（0.16.14） | `query` `limit` | 表情包 · 默认关 |
+| `qq_face_rename` | 看图给收藏表情**改名**成「名称 \| 情绪词」（0.16.14） | `emoji_id` `desc` | 表情包 · 默认关 |
+| `qq_wait` | 等他把话说完，返回这期间新到的消息（默认 8s，单次上限 60s，另有**单回合累计上限** `waitTurnMaxMs`） | `ms` `user_id` `group_id` | 沉默权 · **默认开** |
+| `qq_pass` | 划走：这一回合不开口（正文里已经写了真话的，仍然会发出去 —— 写了就算说出口） | `why` `user_id` `group_id` | 沉默权 · **默认开** |
+| `qq_skip` | 跳过：这条不该有回复，**连正文都不发**（0.16.16） | `why` `user_id` `group_id` | 沉默权 · **默认开** |
+| `qq_close` | 收摊：双方都收尾时结束会话，记下聊到哪儿、下次怎么接 | `summary` `next` `user_id` `group_id` | 沉默权 · **默认开** |
+| `qq_poke` | 戳一下某人（QQ 的「拍一拍」）—— 比发消息轻得多的「叫你一声」 | `user_id` `group_id` | 戳一戳 · 默认关 |
+| `qq_voice` | 把一条语音转成文字（`[语音]` 只是占位，听不到内容；0.17.1） | `message_id` | 语音识别 · 默认关 |
+
+### 工具箱：按功能档开关（0.17.4）
+
+工具 schema 是**每次请求**都进上下文的固定开销（全开实测约 10.3 千字符 / 5 千 token 量级）。
+所以设置页「配置 → 工具箱」把不常用的能力按用途分档，**关掉的那一档根本不注册**（schema 不生成）：
+
+| 档位 | 包含 | 默认 | 关掉省 |
+|---|---|---|---|
+| 发送消息 | `qq_send` | 恒开 | —— 关了这个插件就没意义，所以**不给开关** |
+| 沉默权 | `qq_wait` `qq_pass` `qq_skip` `qq_close` | 开 | 约 2.6 千字符 |
+| 表情包 | `qq_emoji_search` `qq_face_pick` `qq_face_preview` `qq_face_rename` `qq_collect_face` | 关 | 约 3.8 千字符（最大一块） |
+| 语音识别 | `qq_voice` | 关 | 约 0.5 千字符 |
+| 发送语音 | `qq_send` 的 `voice` 参数 | 关 | 约 0.3 千字符 |
+| 戳一戳 | `qq_poke` | 关 | 约 0.5 千字符 |
+
+按默认值装好之后约省 4.8 千字符（剩余约 5.5 千）—— 具体数字由设置页**实测**给出，本文此处只是量级。
+
+三条要紧的：
+
+1. **改完要重启 DSH**。工具在插件 `apply` 里注册，改 `toolFeatures` 不会热生效。
+2. **表情包必须整档启停**。档内五个工具互相指名（`qq_face_rename` 让你先调 `qq_face_pick`，
+   `qq_face_preview` 让你看完去 `qq_collect_face`），拆开就会留下指向不存在工具的话术。
+3. 关掉一档之后，`qq_send` 的说明会**跟着变短**：提到那一档工具的话术整段消失，
+   `voiceOut` 关掉时 `voice` 参数**从 schema 里移除**（而不是留着参数调用时报错）。
+   失败路径上的报错（收藏表情没匹配上等）也按开关换措辞 ——
+   否则模型会去调一个不存在的工具，拿到 `UNKNOWN_TOOL` 后换个写法再试，反而更烧 token。
+   `lib/face-resolve.js` / `lib/preview.js` 的报错则统一改成**不点名任何工具**的通用说法。
 
 ```jsonc
 // 发消息 + 经典小表情
@@ -726,7 +754,7 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-46 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+49 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
@@ -734,7 +762,8 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `notice.js`（回合中断时替插件说一句带 `[系统]` 的话） `split.js`（分条） `title.js`（会话标题） `history.js`（历史检索实现保留，工具当前未注册） |
-| 能力与 UI | `tool.js`（12 个工具已注册；工具实现还保留历史查询、说说与手动记忆代码但当前未注册） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：受限本机目录 → 协议端上传 → record 段） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 能力与 UI | `tool.js`（12 个工具实现，按「工具箱」分档注册：默认注册 5 个、其余 7 个要打开对应档；工具实现还保留历史查询、说说与手动记忆代码但当前未注册） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：受限本机目录 → 协议端上传 → record 段） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 跨工作区 | `focus.js`（焦点路由：把消息只送到指定的那个会话） `progress.js`（工作进度投影） `commands.js`（`/进度` `/看` `/帮助` `/去` `/回` 等 QQ 侧命令） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（说说实现保留，发布工具当前未注册） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |
 
@@ -774,7 +803,7 @@ SnowLuma 的 OneBot 端口（HTTP 3000 / WS 3001）是**等 QQ 登录成功之�
 
 | 阶段 | 时机 | 做什么 |
 |---|---|---|
-| 立即 | 插件加载时 | 注册 12 个工具、设置页 API、主动发消息接口、回复转发队列 |
+| 立即 | 插件加载时 | 按「工具箱」分档注册工具（默认 5 个）、设置页 API、主动发消息接口、回复转发队列 |
 | 延后 | OneBot 探活通过后 | 启动私聊/群聊轮询、WS 事件推送、主动搭话的钟 |
 
 - **工具先注册**：工具是出站能力，跟 QQ 登录无关。早给 agent，QQ 迟迟不登录时它也不至于「一个工具都看不到」。

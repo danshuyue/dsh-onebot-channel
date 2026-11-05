@@ -114,6 +114,9 @@ const DELIBERATE = {
   backfillOnStart: '上线补历史，开关在接口暂留',
   qzoneRequireConfirm: '说说发布工具当前未注册，不向设置页暴露无效开关',
   workspaceCwd: '由会话列表决定，界面只显示',
+  // 0.17.4：toolFeatures 是**对象**，五个子键在设置页是一组复选框（走 onFeature，
+  // 不是 onField），所以「顶层键字面量」这套检查抓不到子键 —— 它有自己的断言（8e 节）。
+  toolFeatures: '对象型字段，五个子键由「工具箱」区块的复选框组接管（见 8e 节）',
 }
 const uncovered = defaultKeys
   .filter((k) => !writable.includes(k))
@@ -185,6 +188,35 @@ ok(/mode === 'paragraph' \? isPunctOnly/.test(splitSrc), 'paragraph 模式不按
 ok(read('lib/outbound.js').includes("config.splitMode === 'sentence'"), '转发链把 splitMode 传给了切分器')
 ok(read('docs/QQ对话说明.md').includes('换行 = 另起一条'), '对话说明里告诉了模型「换行就是分条」')
 ok(clientSrc.includes('qqb-warn'), '插件被停用时页面会显式告警')
+
+// ---- 8e. 工具箱分档（0.17.4）：对象字段的五个子键都要有控件 ---------------
+// 前几节按 DEFAULTS 的**顶层键**扫描，toolFeatures 只是一个键，抓不到它的子键；
+// 所以这里单独把五个子键对一遍 —— 漏一个，用户就永远打不开那一档。
+{
+  const FEATURE_KEYS = ['silence', 'emoji', 'voiceIn', 'voiceOut', 'poke']
+  const cfgSrc = read('lib/config.js')
+  const defaultsBlock2 = cfgSrc.slice(cfgSrc.indexOf('export const TOOL_FEATURE_DEFAULTS'), cfgSrc.indexOf('export function normalizeToolFeatures'))
+  for (const key of FEATURE_KEYS) {
+    ok(new RegExp(`^ {2}${key}:`, 'm').test(defaultsBlock2), `TOOL_FEATURE_DEFAULTS 里有 ${key}`)
+  }
+  // 子键必须真的接到「工具箱」区块的复选框上（row(...) 的四个参数是 key/标签/说明）
+  for (const key of FEATURE_KEYS) {
+    ok(new RegExp(`row\\('${key}',`).test(clientSrc), `设置页「工具箱」有 ${key} 的复选框`)
+  }
+  // 嵌套字段必须走自己的 setter —— onField 会把整个对象替换成布尔值
+  ok(clientSrc.includes('function onFeature'), '嵌套字段有专用的 onFeature setter')
+  ok(!/onChange: onField\('toolFeatures'\)/.test(clientSrc), 'toolFeatures 没有被 onField 直接接管')
+  // 后端：对象字段必须单独成类，并在保存时归一化
+  ok(apiSrc.includes('OBJECT_FIELDS'), '后端有 OBJECT_FIELDS 这一类')
+  ok(/OBJECT_FIELDS\s*=\s*\['toolFeatures'\]/.test(apiSrc), 'OBJECT_FIELDS 里就是 toolFeatures')
+  ok(apiSrc.includes('normalizeToolFeatures(body[key])'), '保存时走 normalizeToolFeatures 归一化')
+  // 字符数必须实测（不手写）：后端有测量函数、前端消费它
+  ok(apiSrc.includes('export async function toolSchemaSizes'), '后端有实测 schema 字符数的函数')
+  ok(apiSrc.includes('toolSizes: await toolSchemaSizes()'), '/state 里带实测字符数')
+  ok(!/约 2\.4 万|24000|15000 字符/.test(clientSrc), '设置页没有手写的字符数常量')
+  // 「改完要重启」必须写在设置页上（工具在 apply 里注册，热改无效）
+  ok(clientSrc.includes('改完这一块要'), '工具箱卡片写明了改完要重启才生效')
+}
 
 // ---- 9. 过时文案不再出现 ----------------------------------------------------
 ok(!clientSrc.includes('可以在这里给某个号新建会话'), '顶部注释不再声称有「新建会话」')

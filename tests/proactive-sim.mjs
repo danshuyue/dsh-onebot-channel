@@ -298,6 +298,17 @@ console.log('上游修复 · formatClock 与主动提示基准：')
   const entry = { lastIncomingAt: now - 8 * 3600000, lastProactiveAt: now - 3600000 }
   const nudge = composeNudge('private:100', entry, now)
   ok(nudge.includes('距上次互动已经 1 小时'), '主动提示与判定共享最近互动时间，不再用更早的来信时间')
+
+  // ---- 「沉默权」档被关掉时，文案不能还点名 qq_pass（2026-11-05 审计发现 E）----
+  // 关掉那一档后 qq_pass / qq_skip / qq_wait / qq_close 都不注册，
+  // 还写「就 qq_pass」= 教模型去调一个不存在的工具，它会拿到 UNKNOWN_TOOL 再换个写法试。
+  ok(nudge.includes('qq_pass'), '沉默权开着时，主动提示点名 qq_pass（最直接）')
+  const nudgeNoSilence = composeNudge('private:100', entry, now, { silence: false })
+  ok(!nudgeNoSilence.includes('qq_pass'), '★ 沉默权关掉时，主动提示不再点名 qq_pass')
+  ok(!nudgeNoSilence.includes('qq_skip'), '★ 沉默权关掉时，也不点名 qq_skip')
+  ok(nudgeNoSilence.includes('什么都不发'), '沉默权关掉时给了「什么都不发」这个替代出口')
+  ok(nudgeNoSilence.includes('不调用任何工具'), '并且说清了「不调工具 = 沉默」，否则模型会硬说一句')
+  ok(composeNudge('private:100', entry, now).includes('直接 qq_pass。）'), '不传 options 时文案与改动前一致（老调用方不受影响）')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
