@@ -113,7 +113,6 @@ const DELIBERATE = {
   enabled: '总开关只在加载时读一次，给按钮会误导成即时生效',
   backfillOnStart: '上线补历史，开关在接口暂留',
   qzoneRequireConfirm: '说说发布工具当前未注册，不向设置页暴露无效开关',
-  workspaceCwd: '由会话列表决定，界面只显示',
   // 0.17.4：toolFeatures 是**对象**，五个子键在设置页是一组复选框（走 onFeature，
   // 不是 onField），所以「顶层键字面量」这套检查抓不到子键 —— 它有自己的断言（8e 节）。
   toolFeatures: '对象型字段，五个子键由「工具箱」区块的复选框组接管（见 8e 节）',

@@ -796,7 +796,10 @@ reply + at + text   ← 原样
   },
 
   // ---- 会话 ----
-  "workspaceCwd": "D:\\DSH workspace\\QQ对话",
+  // 会话来源工作区。必须是 ~/.dsh/storages/workspace.json 里已有的工作区路径
+  // （设置页「绑定」页顶部有下拉框，选中即生效）。留空 = 不筛，列出全部会话。
+  // ⚠️ 这个值不只是筛会话，还是「收到的图片」副本目录的根，选错会连带把图搬走。
+  "workspaceCwd": "D:\\Yansunsky\\Desktop\\文本\\DSHQQ对话",
   "resumeColdSession": true,                   // 会话没开着时冷启动它
   "fallbackToLiveSession": false,               // 首选会话没 agent 时改投别的会话
                                                  // ⚠️ 这会绕过路由表，默认关着
@@ -873,12 +876,13 @@ reply + at + text   ← 原样
 
 ## HTTP 接口
 
-插件自带六个同源接口（设置页用的也是它们）：
+插件自带八个同源接口（设置页用的也是它们）：
 
 | 方法 | 路径 | 作用 |
 |---|---|---|
 | GET | `/api/qq-bridge/state` | 配置（不含 token）+ 路由表 + 会话列表 + 好友/群列表 + 机器人信息 |
-| POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置（含 `onebotHttp` / `token`，留空不覆盖） |
+| GET | `/api/qq-bridge/workspaces` | 工作区注册表里的可选工作区（`{ id, title, path, sessionCount }`，按最近使用倒序）。0.18.4 加，给设置页的「会话来源工作区」下拉用；读不到注册表返回空数组 + `ok:true` |
+| POST | `/api/qq-bridge/save` | 保存 `routes` 与高级设置（含 `onebotHttp` / `token`，留空不覆盖）；`workspaceCwd` 会先按工作区注册表校验，对不上返回 400 |
 | POST | `/api/qq-bridge/clear-credentials` | 清空 HTTP / WebSocket token（不可撤销） |
 | POST | `/api/qq-bridge/detect-ws` | 自动发现协议端的 WS 接入点 |
 | POST | `/api/qq-bridge/detect-http` | 自动发现协议端的 HTTP 接入点（读 `httpServers`，0.15.0） |
