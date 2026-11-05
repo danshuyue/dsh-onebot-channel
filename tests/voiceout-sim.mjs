@@ -315,6 +315,42 @@ console.log('\n7. qq_send 的 voice 参数接好了：')
   ok(rendered.includes('语音'), `render 里提到语音（实际「${rendered}」）`)
   const renderedPlain = tool.output.render({}, { message_id: 1 }).map((b) => b.text).join('')
   ok(!renderedPlain.includes('语音'), '没发语音时不提语音（输出形态不变）')
+
+  // ---- 引用索引：qq_send 发出去的消息必须能被「引用」找回会话（2026-11-05）----
+  //
+  // ⚠️ 这是「引用即路由」的第二个入口。outbound.js 的自动转发记了，
+  //    但她主动调 qq_send 说的话走的是另一条路 —— 那条不记，
+  //    用户引用她主动说的话时就会静默回落到默认绑定会话。
+  //    这个缺口是我在准备实测时才发现的，当时 outbound 记了、tool 没记。
+  const focus = await import('../lib/focus.js')
+  focus.clearSent()
+  sendReply = { retcode: 0, data: { message_id: -777001 } }
+  calls.length = 0
+
+  // ① 给了 exec.agent.session → 必须记下索引
+  await tool.execute(
+    { text: '这条是当前会话发的', user_id: '1321833118' },
+    { agent: { session: { header: { id: 'session-current-workspace' } } } }
+  )
+  const hit = focus.sessionOfSent('-777001')
+  ok(hit !== null, '★ qq_send 发出消息后记下了引用索引（用户引用它才能回对这个会话）')
+  ok(hit?.sessionId === 'session-current-workspace', `索引里记的是发起调用的会话（实际 ${hit?.sessionId}）`)
+
+  // ② 没有 exec / 取不到 session → 不记，且不能记错
+  focus.clearSent()
+  sendReply = { retcode: 0, data: { message_id: -777002 } }
+  await tool.execute({ text: '没有 exec 的消息', user_id: '1321833118' })
+  ok(focus.sessionOfSent('-777002') === null, '★ 取不到 exec.agent.session 时不记索引（绝不瞎记一个 id）')
+
+  // ③ session.id 的另一种形状（没有 header）也要认
+  focus.clearSent()
+  sendReply = { retcode: 0, data: { message_id: -777003 } }
+  await tool.execute(
+    { text: '裸 id 形状', user_id: '1321833118' },
+    { agent: { session: { id: 'session-bare-id' } } }
+  )
+  ok(focus.sessionOfSent('-777003')?.sessionId === 'session-bare-id', '★ session.id（无 header）也能取到')
+  focus.clearSent()
 }
 
 console.log('\n8. 同一目标每分钟语音频控：')
