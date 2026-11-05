@@ -8,7 +8,8 @@
  * 同 forward-mutation：源码只读，变异跑在仓库外的临时副本上
  * （插件目录 ACL 断过继承，低完整性令牌改不了里面的文件）。
  */
-import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, copyFileSync, openSync, closeSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync, copyFileSync, openSync, closeSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -20,14 +21,16 @@ const ORIGINALS = {
   'tool.js': readFileSync(join(ROOT, 'lib', 'tool.js'), 'utf8')
 }
 
-const SANDBOX = join(ROOT, '..', `.tmp-voiceout-mutation-${process.pid}`)
+const SANDBOX = mkdtempSync(join(tmpdir(), 'dsh-voiceout-mutation-'))
 const SANDBOX_LIB = join(SANDBOX, 'lib')
 const SANDBOX_TESTS = join(SANDBOX, 'tests')
+const PROTECTED_HOME = join(SANDBOX, 'protected-home')
 
 function prepareSandbox() {
-  rmSync(SANDBOX, { recursive: true, force: true })
   mkdirSync(SANDBOX_LIB, { recursive: true })
   mkdirSync(SANDBOX_TESTS, { recursive: true })
+  mkdirSync(PROTECTED_HOME, { recursive: true })
+  writeFileSync(join(PROTECTED_HOME, 'sentinel.txt'), 'keep', 'utf8')
   for (const file of readdirSync(join(ROOT, 'lib'))) {
     if (!file.endsWith('.js')) continue
     writeFileSync(join(SANDBOX_LIB, file), readFileSync(join(ROOT, 'lib', file), 'utf8'), 'utf8')
@@ -63,14 +66,14 @@ const MUTATIONS = [
     // 不校验扩展名 → 文本文件也会被当语音传上去，浪费一次上传还发不出去
     name: '不校验音频扩展名',
     file: 'voiceout.js',
-    from: "  if (!looksLikeAudio(raw)) {",
+    from: '  if (!looksLikeAudio(realPath)) {',
     to: "  if (false) {"
   },
   {
     // 空文件照样传 → 协议端转码失败，报一个看不懂的错
     name: '不拦空文件',
     file: 'voiceout.js',
-    from: "    if (info.size === 0) return { ok: false, error: `文件是空的：${raw}` }",
+    from: "    if (before.size === 0) return { ok: false, error: `文件是空的：${raw}` }",
     to: '    void 0'
   },
   {
@@ -91,8 +94,8 @@ const MUTATIONS = [
     // 群发到私聊接口（或反之）→ 白名单字段对不上
     name: '群聊走私聊接口',
     file: 'voiceout.js',
-    from: "    action: isGroup ? 'send_group_msg' : 'send_private_msg',\n    params: isGroup",
-    to: "    action: 'send_private_msg',\n    params: isGroup"
+    from: "  const action = isGroup ? 'send_group_msg' : 'send_private_msg'",
+    to: "  const action = 'send_private_msg'"
   },
   {
     // 只给 voice、不给 text 时，qq_send 应该照样能发（不能因为「空内容」提前抛）
@@ -117,8 +120,11 @@ function runSim() {
     fd = openSync(log, 'w')
     execFileSync(process.execPath, [join(SANDBOX_TESTS, 'voiceout-sim.mjs')], {
       stdio: ['ignore', fd, fd],
-      cwd: SANDBOX
+      cwd: SANDBOX,
+      env: { ...process.env, TMPDIR: SANDBOX, TEMP: SANDBOX, TMP: SANDBOX, VOICEOUT_SIM_HOME: PROTECTED_HOME }
     })
+    const protectedSentinel = join(PROTECTED_HOME, 'sentinel.txt')
+    if (!existsSync(protectedSentinel)) return { failed: 1 }
     return { failed: 0 }
   } catch {
     let output = ''

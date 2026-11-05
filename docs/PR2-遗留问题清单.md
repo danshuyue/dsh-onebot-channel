@@ -106,7 +106,7 @@ return `[#${id}]`
 ### 7. 死代码与文档小问题
 
 - `onebot.js:132` 的 `atTargetsOf` 导出了但 `lib/` 里没有任何调用方，只有测试在用。
-- `tests/at-sim.mjs:59`、`tests/reply-sim.mjs` 多处硬编码真实群号 `685694947`、真实 QQ `762910152`、真实 message_id `-1019027093`；`docs/QQ对话说明.md` 示例用了真实号段。建议换占位号。
+- `tests/at-sim.mjs`、`tests/reply-sim.mjs` 的旧版曾硬编码真实群号、真实 QQ 号和真实 message_id；本轮将残留示例统一替换为占位号。
 - README 把 `qq_msg_history` 列为可用工具，但它在 0.11.1（`fb43015`）已被下线（`lib/index.js` 里注释掉了）。「历史消息能看图」这个功能默认看不到效果，文档需要标注「需手动开启」。
 
 ### 8. 版本号序列

@@ -288,12 +288,16 @@ console.log('上游修复 · 摇号区间 idleMaxHours：')
   ok(Math.abs((fixed.eligibleAt - entry.lastIncomingAt) / 3600000 - 2) < 0.01, 'idleMaxHours=0 时用固定门槛（不随机）')
 }
 
-console.log('上游修复 · formatClock：')
+console.log('上游修复 · formatClock 与主动提示基准：')
 {
-  const { formatClock } = await import('../lib/proactive.js')
-  const text = formatClock(new Date('2026-11-03T14:05:00').getTime())
+  const { composeNudge, formatClock } = await import('../lib/proactive.js')
+  const now = new Date('2026-11-03T14:05:00').getTime()
+  const text = formatClock(now)
   ok(/^2026-11-03 14:05（周[一二三四五六日]）$/.test(text), `格式正确（${text}）`)
   ok(text.includes('周'), '带星期几（周末和工作日说的话不一样）')
+  const entry = { lastIncomingAt: now - 8 * 3600000, lastProactiveAt: now - 3600000 }
+  const nudge = composeNudge('private:100', entry, now)
+  ok(nudge.includes('距上次互动已经 1 小时'), '主动提示与判定共享最近互动时间，不再用更早的来信时间')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)

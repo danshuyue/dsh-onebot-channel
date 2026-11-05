@@ -11,7 +11,7 @@
  *
  * 隔离：整个测试跑在临时 HOME 里，不碰真的 ~/.dsh。
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -64,7 +64,7 @@ globalThis.fetch = async () => ({ ok: true, json: async () => ({ retcode: 0, dat
 
 const { loadConfig, getConfig } = await import('../lib/config.js')
 const { loadState, getState, saveState } = await import('../lib/state.js')
-const { openWindow, windowOf, closeWindow, windowMessages, startWindowLoop, queueWindowMessage } = await import('../lib/window.js')
+const { openWindow, windowOf, closeWindow, windowMessages, startWindowLoop, queueWindowMessage, touchWindow } = await import('../lib/window.js')
 const { deliverWindowBatch, handleGroupMessage } = await import('../lib/poll.js')
 
 loadConfig()
@@ -599,6 +599,141 @@ console.log('审核发现 #7：跨度不能低报：')
   ok(windowMessages(GROUP).length === 0, '全部投完')
   ok(pendingAgeMs(GROUP) === 0, '队列空了跨度归 0')
   closeWindow(GROUP, 'age-test-done')
+}
+
+console.log('巡检配置回退、过旧序号日志：')
+{
+  const { getState: gs, saveState: persistState } = await import('../lib/state.js')
+  const runSweepCase = (name, idle, max, idleAge, maxAge, expectedActive) => {
+    closeWindow(GROUP, 'sweep-test-reset')
+    gs().windows = {}
+    cfg.windowIdleMs = idle
+    cfg.windowMaxMs = max
+    openWindow(GROUP, PEER)
+    const record = gs().windows[GROUP]
+    record.lastActivityAt = Date.now() - idleAge
+    record.openedAt = Date.now() - maxAge
+    persistState({ windows: gs().windows })
+    const stop = startWindowLoop(ctx, async () => ({ status: 'delivered' }))
+    stop()
+    ok((windowOf(GROUP) !== null) === expectedActive, name)
+  }
+  runSweepCase('负 idle 回退 120000ms（超时后关闭）', -1, 600000, 130000, 0, false)
+  runSweepCase('非有限 idle 回退 120000ms（未到期保留）', NaN, 600000, 110000, 0, true)
+  runSweepCase('负 max 回退 600000ms（超时后关闭）', 120000, -1, 0, 610000, false)
+  runSweepCase('非有限 max 回退 600000ms（未到期保留）', 120000, Infinity, 0, 590000, true)
+  runSweepCase('idle=0 保留立即关闭语义', 0, 600000, 0, 0, false)
+  runSweepCase('max=0 保留立即关闭语义', 120000, 0, 0, 0, false)
+
+  closeWindow(GROUP, 'stale-seq-test-reset')
+  gs().windows = {}
+  openWindow(GROUP, PEER)
+  touchWindow(GROUP, 550)
+  ok(queueWindowMessage(GROUP, msg(PEER, 5501, 550, '过旧 seq 不入队')) === false,
+    'seq<=lastWindowSeq 被拒绝')
+  const log = readFileSync(join(SANDBOX_DATA, 'qq-bridge-load.log'), 'utf8')
+  ok(log.includes(`skip stale seq group=${GROUP} seq=550 <= lastWindowSeq=550`),
+    '过旧 seq 拒绝在 load log 中可观测')
+  closeWindow(GROUP, 'stale-seq-test-done')
+}
+
+console.log('所有 @ 串行（窗口未开 / windowEnabled=false）：')
+{
+  const { getState: gs } = await import('../lib/state.js')
+  const originalFetch = globalThis.fetch
+  const runRace = async (windowEnabled, label) => {
+    closeWindow(GROUP, 'at-serial-test-reset')
+    gs().windows = {}
+    gs().groups = { [GROUP]: { lastSeq: 0, lastDeliveredSeq: 0 } }
+    cfg.windowEnabled = windowEnabled
+    cfg.groupOnlyWhenAt = true
+    cfg.groupContextCount = 0
+    cfg.forwardExpandEnabled = true
+    delivered.length = 0
+    let unblock
+    let requested
+    const blocked = new Promise((resolve) => { unblock = resolve })
+    const requestStarted = new Promise((resolve) => { requested = resolve })
+    globalThis.fetch = async (_url, options) => {
+      if (JSON.parse(options.body).action === 'get_forward_msg') {
+        requested()
+        await blocked
+      }
+      return { ok: true, json: async () => ({ retcode: 0, data: { messages: [] } }) }
+    }
+    const first = {
+      ...msg(PEER, 7001, 701, `${label} 第一条`),
+      message: [
+        { type: 'at', data: { qq: SELF } },
+        { type: 'text', data: { text: `${label} 第一条` } },
+        { type: 'forward', data: { id: `serial-${label}` } }
+      ]
+    }
+    const second = {
+      ...msg(PEER, 7002, 702, `${label} 第二条`),
+      message: [{ type: 'at', data: { qq: SELF } }, { type: 'text', data: { text: `${label} 第二条` } }]
+    }
+    const firstTask = handleGroupMessage(ctx, GROUP, first, [])
+    await requestStarted
+    const secondTask = handleGroupMessage(ctx, GROUP, second, [])
+    unblock()
+    const [a, b] = await Promise.all([firstTask, secondTask])
+    const bodies = delivered.map((item) => item?.content?.[0]?.text ?? '')
+    ok(a.status === 'delivered' && b.status === 'delivered', `${label} 两条 @ 都成功`)
+    ok(bodies.length === 2 && bodies[0].includes(`${label} 第一条`) && bodies[1].includes(`${label} 第二条`),
+      `${label} 即使首条预取阻塞也按到达顺序投递`)
+    if (!windowEnabled) ok(windowOf(GROUP) === null, '关闭窗口功能时仍保持 legacy：不意外开窗')
+    closeWindow(GROUP, 'at-serial-test-done')
+  }
+  try {
+    await runRace(true, '未开窗场景')
+    await runRace(false, '关闭窗口场景')
+  } finally {
+    globalThis.fetch = originalFetch
+    cfg.windowEnabled = true
+    cfg.forwardExpandEnabled = false
+  }
+}
+
+console.log('同一轮轮询的 @ 共享已投递上下文快照：')
+{
+  const { getState: gs } = await import('../lib/state.js')
+  closeWindow(GROUP, 'shared-context-test-reset')
+  gs().windows = {}
+  gs().groups = { [GROUP]: { lastSeq: 60, lastDeliveredSeq: 60 } }
+  cfg.windowEnabled = true
+  cfg.windowIdleMs = 120000
+  cfg.windowMaxMs = 600000
+  cfg.forwardExpandEnabled = false
+  cfg.groupContextCount = 6
+  const opened = openWindow(GROUP, PEER)
+  delivered.length = 0
+  const batch = [
+    msg(PEER, 8101, 81, '轮询批次旧话一'),
+    msg(PEER, 8102, 82, '轮询批次旧话二'),
+    msg(PEER, 8103, 83, '轮询批次旧话三')
+  ]
+  const queued = batch.map((item) => queueWindowMessage(GROUP, item))
+  const stop = startWindowLoop(ctx, async (...args) => deliverWindowBatch(...args))
+  const deadline = Date.now() + 2000
+  while ((delivered.length === 0 || windowMessages(GROUP).length > 0) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  stop()
+  ok(opened === true, `测试窗口成功打开（${JSON.stringify(windowOf(GROUP))}）`)
+  ok(queued.every(Boolean), `三条续聊都入队（${JSON.stringify(queued)}）`)
+  ok(delivered.length === 1, `窗口循环先投递一批续聊（queue=${windowMessages(GROUP).length}）`)
+  const samePollSnapshot = new Set()
+  const atOne = { ...msg(PEER, 8104, 84, '同批第一条 @'), message: [{ type: 'at', data: { qq: SELF } }, { type: 'text', data: { text: '同批第一条 @' } }] }
+  const atTwo = { ...msg(PEER, 8105, 85, '同批第二条 @'), message: [{ type: 'at', data: { qq: SELF } }, { type: 'text', data: { text: '同批第二条 @' } }] }
+  const first = await handleGroupMessage(ctx, GROUP, atOne, batch, 60, samePollSnapshot)
+  const second = await handleGroupMessage(ctx, GROUP, atTwo, batch, 60, samePollSnapshot)
+  const firstBody = delivered[1]?.content?.[0]?.text ?? ''
+  const secondBody = delivered[2]?.content?.[0]?.text ?? ''
+  ok(first.status === 'delivered' && second.status === 'delivered', '同批两条 @ 都投递成功')
+  ok(samePollSnapshot.size >= 6, '第一条 @ 消费最近投递快照后共享给同批后续 @')
+  ok(!firstBody.includes('轮询批次旧话') && !secondBody.includes('轮询批次旧话'),
+    '同一 poll 批里的连续 @ 都不重复带入刚投递的批次')
+  closeWindow(GROUP, 'shared-context-test-done')
 }
 
 // 窗口关掉时不该再投（关窗后 pending 清空、批次不再属于任何窗口）

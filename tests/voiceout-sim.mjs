@@ -10,12 +10,11 @@
  *
  * 隔离：临时 HOME，fetch 被替换，不碰真 ~/.dsh、不碰真协议端。
  */
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync, lstatSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 
-const HERE = dirname(fileURLToPath(import.meta.url))
-const SANDBOX_HOME = join(HERE, '..', '..', '.tmp-test', `voiceout-${process.pid}`)
+const SANDBOX_HOME = mkdtempSync(join(tmpdir(), 'dsh-voiceout-test-'))
 const SANDBOX_DATA = join(SANDBOX_HOME, '.dsh')
 mkdirSync(SANDBOX_DATA, { recursive: true })
 process.env.USERPROFILE = SANDBOX_HOME
@@ -24,6 +23,9 @@ process.on('exit', () => {
   try { rmSync(SANDBOX_HOME, { recursive: true, force: true }) } catch {}
 })
 
+const AUDIO_DIR = join(SANDBOX_HOME, 'audio')
+mkdirSync(AUDIO_DIR, { recursive: true })
+
 writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
   enabled: true,
   selfUin: '3566906627',
@@ -31,6 +33,7 @@ writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
   ownerUin: '1321833118',
   // 群必须写进 groupUins，否则 allowlist 会把群语音拦下来（这是对的，不是 bug）
   groupUins: ['1103117551'],
+  voiceOutputDir: AUDIO_DIR,
   onebotHttp: 'http://127.0.0.1:9/',
   token: 'test-token'
 }, null, 2), 'utf8')
@@ -43,14 +46,46 @@ function ok(condition, name) {
 }
 
 // ---- 假音频文件 ----
-const AUDIO_DIR = join(SANDBOX_HOME, 'audio')
-mkdirSync(AUDIO_DIR, { recursive: true })
+function wavBytes() {
+  const bytes = Buffer.alloc(46)
+  bytes.write('RIFF', 0, 'ascii')
+  bytes.writeUInt32LE(38, 4)
+  bytes.write('WAVEfmt ', 8, 'ascii')
+  bytes.writeUInt32LE(16, 16)
+  bytes.writeUInt16LE(1, 20) // PCM
+  bytes.writeUInt16LE(1, 22) // mono
+  bytes.writeUInt32LE(8000, 24)
+  bytes.writeUInt32LE(16000, 28)
+  bytes.writeUInt16LE(2, 32)
+  bytes.writeUInt16LE(16, 34)
+  bytes.write('data', 36, 'ascii')
+  bytes.writeUInt32LE(2, 40)
+  return bytes
+}
 const WAV = join(AUDIO_DIR, 'voice.wav')
-writeFileSync(WAV, Buffer.from('RIFF....WAVEfmt ' + 'x'.repeat(200), 'ascii'))
+writeFileSync(WAV, wavBytes())
+const AMR = join(AUDIO_DIR, 'voice.amr')
+writeFileSync(AMR, Buffer.from('#!AMR\n\x00', 'binary'))
+const AMR_WB = join(AUDIO_DIR, 'voice-wb.amr')
+writeFileSync(AMR_WB, Buffer.from('#!AMR-WB\n\x00', 'binary'))
+const FAKE_WAV = join(AUDIO_DIR, 'fake.wav')
+writeFileSync(FAKE_WAV, Buffer.from('not a wav', 'ascii'))
 const TXT = join(AUDIO_DIR, 'notes.txt')
 writeFileSync(TXT, 'not audio', 'utf8')
 const EMPTY = join(AUDIO_DIR, 'empty.wav')
 writeFileSync(EMPTY, '', 'utf8')
+const OUTSIDE = join(SANDBOX_HOME, 'outside.wav')
+writeFileSync(OUTSIDE, wavBytes())
+const OUTSIDE_DIR = join(SANDBOX_HOME, 'outside-audio')
+mkdirSync(OUTSIDE_DIR, { recursive: true })
+const OUTSIDE_DIR_WAV = join(OUTSIDE_DIR, 'outside.wav')
+writeFileSync(OUTSIDE_DIR_WAV, wavBytes())
+const ESCAPE_DIR = join(AUDIO_DIR, 'escape')
+let symlinkAvailable = false
+try {
+  symlinkSync(OUTSIDE_DIR, ESCAPE_DIR, 'junction')
+  symlinkAvailable = lstatSync(ESCAPE_DIR).isSymbolicLink()
+} catch { /* 仅在不支持 junction 的环境跳过该用例 */ }
 
 // ---- 假协议端 ----
 const calls = []
@@ -69,7 +104,7 @@ globalThis.fetch = async (_url, init) => {
   return { ok: true, json: async () => sendReply }
 }
 
-const { loadConfig } = await import('../lib/config.js')
+const { loadConfig, getConfig } = await import('../lib/config.js')
 const voiceout = await import('../lib/voiceout.js')
 loadConfig()
 
@@ -103,10 +138,23 @@ console.log('\n2. 两步上传（合并成一请求拿不到 file_path）：')
   ok(uploads[0]?.params?.filename === 'voice.wav', '带上了文件名')
 }
 
+console.log('\n2b. AMR / AMR-WB 的标准 LF 头：')
+{
+  for (const [path, label] of [[AMR, 'AMR'], [AMR_WB, 'AMR-WB']]) {
+    calls.length = 0
+    const result = await voiceout.uploadVoiceFile(path)
+    ok(result.ok === true, `${label} 标准换行头通过校验（${result.error || 'ok'}）`)
+    ok(calls.length === 2, `${label} 走完两步上传`)
+  }
+}
+
 console.log('\n3. 非音频 / 坏文件在**上传前**就拒掉（不发请求）：')
 {
   for (const [path, label, expect] of [
     [TXT, 'txt 文件', '不认识的音频格式'],
+    [FAKE_WAV, '扩展名伪装的 WAV', 'WAV 文件头无效'],
+    [OUTSIDE, 'TTS 目录外音频', '必须位于配置的 TTS 输出目录内'],
+    ...(symlinkAvailable ? [[join(ESCAPE_DIR, 'outside.wav'), '目录 junction 指向外部', '必须位于配置的 TTS 输出目录内']] : []),
     [EMPTY, '空文件', '空的'],
     ['', '空路径', '没给文件路径'],
     [join(AUDIO_DIR, 'nope.wav'), '不存在的文件', '读不到']
@@ -117,6 +165,17 @@ console.log('\n3. 非音频 / 坏文件在**上传前**就拒掉（不发请求�
     ok(String(result.error).includes(expect), `${label} 的错因含「${expect}」（实际「${result.error}」）`)
     ok(calls.length === 0, `${label} 没有发出任何请求`)
   }
+}
+
+console.log('\n3b. 空的语音目录配置关闭本机读取：')
+{
+  const original = getConfig().voiceOutputDir
+  calls.length = 0
+  getConfig().voiceOutputDir = ''
+  const result = await voiceout.uploadVoiceFile(WAV)
+  ok(result.ok === false && String(result.error).includes('未配置语音输出目录'), '未配置输出目录时拒绝读取')
+  ok(calls.length === 0, '未配置输出目录时不发请求')
+  getConfig().voiceOutputDir = original
 }
 
 console.log('\n4. 上传各阶段失败都不抛：')
@@ -196,6 +255,7 @@ console.log('\n6. 发送阶段失败要抛（上传成功但没发出去 ≠ 成
 
 console.log('\n7. qq_send 的 voice 参数接好了：')
 {
+  voiceout.resetVoiceRateState()
   const { registerSendTool } = await import('../lib/tool.js')
   const regs = []
   const ctx = {
@@ -255,6 +315,23 @@ console.log('\n7. qq_send 的 voice 参数接好了：')
   ok(rendered.includes('语音'), `render 里提到语音（实际「${rendered}」）`)
   const renderedPlain = tool.output.render({}, { message_id: 1 }).map((b) => b.text).join('')
   ok(!renderedPlain.includes('语音'), '没发语音时不提语音（输出形态不变）')
+}
+
+console.log('\n8. 同一目标每分钟语音频控：')
+{
+  voiceout.resetVoiceRateState()
+  calls.length = 0
+  const target = { kind: 'group', id: '1103117551' }
+  for (let i = 0; i < voiceout.DEFAULT_VOICE_MAX_PER_MINUTE; i += 1) {
+    await voiceout.sendVoiceToQQ(target, WAV)
+  }
+  const beforeRejected = calls.length
+  let rejected = false
+  try { await voiceout.sendVoiceToQQ(target, WAV) } catch (error) {
+    rejected = String(error?.message ?? error).includes('每分钟最多')
+  }
+  ok(rejected, '超过固定上限时拒绝发送')
+  ok(calls.length === beforeRejected, '频控拒绝发生在上传前')
 }
 
 console.log(`\n结果：${passed} 过 / ${failed} 败`)

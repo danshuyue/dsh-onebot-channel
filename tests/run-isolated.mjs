@@ -10,7 +10,7 @@
  * 这个脚本做的事：
  *   1. 造一个临时 HOME，放一份**够用**的 qq-bridge.config.json
  *      （含 groupUins + routes，否则 openWindow 直接返回 false，群类用例全线崩）
- *   2. 逐个用 `node` 子进程跑指定测试（不给参数 = 跑 npm test 那一串）
+ *   2. 逐个用 `node` 子进程跑指定测试（不给参数 = 跑 package.json 的 test:raw 测试链）
  *   3. 汇总谁红了，退出码 = 红了的个数
  *
  * ⚠️ 子进程输出用**文件重定向**而不是管道：受限环境下管道会 EPERM，
@@ -91,7 +91,7 @@ writeFileSync(join(DATA, 'qq-bridge-state.json'), JSON.stringify({
 // 默认跑 npm test 那一串（按 package.json 里的顺序，少写死一份清单）
 const DEFAULT_TESTS = (() => {
   const pkg = JSON.parse(readFileSync(join(PLUGIN, 'package.json'), 'utf8'))
-  const chain = String(pkg.scripts?.test ?? '')
+  const chain = String(pkg.scripts?.['test:raw'] ?? '')
   return [...chain.matchAll(/node\s+(\S+)/g)].map((match) => match[1])
 })()
 

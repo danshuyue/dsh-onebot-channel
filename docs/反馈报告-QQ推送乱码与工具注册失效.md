@@ -264,3 +264,22 @@ if (tools === undefined) return note('tool', 'FAILED no tools service after 10s'
 | 运行副本 | `~/.dsh/profiles/desktop/node_modules/dsh-onebot-channel` = **0.15.0** |
 | 源码 | `D:\Yansunsky\Desktop\project\DSHPlugins\dsh-onebot-channel` = **0.16.1** |
 | 协议端状态 | `get_status` → `online:true, good:true`；`get_login_info` → 3566906627 |
+
+---
+
+## 复核与修复结果（源码 0.16.2）
+
+| 反馈项 | 判定 | 处理 |
+|---|---|---|
+| QQ 中文乱码 | 这次实验定位到 MSYS2 `bash → curl.exe` 的 argv 编码转换；报告中的插件 `fetch + JSON.stringify` 路径本身使用 UTF-8 | 请求头显式增加 `charset=utf-8`。不做 U+FFFD 拒发或逐条回读校验：前者会拒绝合法正文，后者增加发送延迟与协议端负载 |
+| 工具注册失效 | 源码确有一次性早退：服务暂缺时所有工具永久不再注册；但“tools 服务就绪晚于 apply”是根据日志推测，未在该环境单独复现 | 全部工具统一等待服务最多 10 秒，每 200ms 重试；插件卸载会取消等待，超时写明确失败日志，并新增模拟测试 |
+| sendapi 端口冲突 / 实例退出 | 日志能证明当时端口冲突和实例退出，但不足以证明通用的源码根因；独立实例的生命周期及本机端口占用需要部署侧进一步采证 | 未改端口重试或实例提升策略，避免在未复现时引入第二个监听者或双实例收发 |
+| WS 地址不一致、配置差异、运行副本版本 | 属于该安装环境/配置及旧运行副本状态，报告证据不能推出对所有部署都成立的代码缺陷 | 未改自动发现优先级或配置写回规则；本次问题版本号由 `0.16.1` 升为 `0.16.2` |
+
+### 构建与安装
+
+- 本地包：`dist/dsh-onebot-channel-0.16.2.tgz`
+- 版本：`dsh-onebot-channel@0.16.2`，59 个文件，约 266.1 KB
+- SHA-1：`b23f34fd8454d56eeed842f30c52c233df04d27f`
+- 验证：隔离 HOME 下完整 `npm test` 通过；所有 `lib/*.js`、`tests/*.mjs` 语法检查和 `git diff --check` 通过；未安装进运行中的 DSH。
+- 本机 `desktop` profile 由 Electron 独占，`dsh plugin --profile desktop` 命令行安装不可用。测试此包时，在 DSH 当前会话请求通过 Host 插件管理器安装上述本地 tgz，并确认安装授权；安装完成后重启 DSH 才会加载新代码。不要在 profile 目录里手改 `package.json` 或运行 `pnpm add`。

@@ -79,7 +79,7 @@ console.log('\n2. 负数 message_id 原样保留（SnowLuma 合法值，不许 N
 
 console.log('\n3. 非法 message_id 直接拒，不发请求：')
 {
-  for (const bad of ['', '0', '-0', 'abc', '12.5']) {
+  for (const bad of ['', '0', '-0', 'abc', '12.5', '9007199254740992', '-9007199254740992']) {
     calls.length = 0
     const result = await voice.transcribeVoice(bad)
     ok(result.ok === false, `「${bad}」被拒`)
