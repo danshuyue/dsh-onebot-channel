@@ -216,6 +216,55 @@ console.log('\n3c. 留空 → 默认落在 <工作区>/voice，目录自动创�
   config.workspaceCwd = originalWs
 }
 
+console.log('\n3d. 边界：off 大小写不敏感、配成已存在的文件要报错而不是静默：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const originalWs = config.workspaceCwd
+  const sandbox = join(SANDBOX_HOME, 'voice-edge-case')
+  mkdirSync(sandbox, { recursive: true })
+  config.workspaceCwd = sandbox
+
+  // off 的三种写法都该关掉。大小写不敏感是故意的：用户手打 Off/OFF 都该生效，
+  // 而不是掉进「把 OFF 当成目录名去建」那条路。
+  for (const value of ['off', 'OFF', 'Off', ' off ']) {
+    config.voiceOutputDir = value
+    const r = voiceout.voiceOutputRoot()
+    ok(r.ok === false && String(r.error).includes('已关闭'), `「${value}」按关闭处理`)
+  }
+
+  // 配成一个**已存在的文件**（不是目录）：必须报错，不能静默当成目录用。
+  // 否则 realpath 之后的 statSync().isDirectory() 会在别处抛一个看不懂的错。
+  const asFile = join(sandbox, 'iam-a-file.txt')
+  writeFileSync(asFile, 'x')
+  config.voiceOutputDir = asFile
+  const r2 = voiceout.voiceOutputRoot()
+  ok(r2.ok === false, '配成已存在的文件 → ok:false')
+  ok(String(r2.error).includes('建不出来') || String(r2.error).includes('不是目录'), `错因说清是目录问题（实际「${r2.error}」）`)
+
+  config.voiceOutputDir = originalDir
+  config.workspaceCwd = originalWs
+}
+
+console.log('\n3e. 目录已存在时不再重复 mkdir（幂等，不因已存在而报错）：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const originalWs = config.workspaceCwd
+  const sandbox = join(SANDBOX_HOME, 'voice-idempotent')
+  config.voiceOutputDir = ''
+  config.workspaceCwd = sandbox
+
+  const first = voiceout.voiceOutputRoot()
+  ok(first.ok === true, '第一次解析：ok')
+  const second = voiceout.voiceOutputRoot()
+  ok(second.ok === true, '第二次解析（目录已存在）：仍 ok，不因已存在而报错')
+  ok(first.dir === second.dir, '两次解析出同一个目录')
+
+  config.voiceOutputDir = originalDir
+  config.workspaceCwd = originalWs
+}
+
 console.log('\n4. 上传各阶段失败都不抛：')
 {
   calls.length = 0
