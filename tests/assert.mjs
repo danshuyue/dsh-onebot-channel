@@ -84,8 +84,11 @@ console.log('split.js：')
   eq(splitMessage('  \n  '), [], '纯空白返回空数组')
 }
 {
-  const d = partDelayMs('短句', { minDelayMs: 200, maxDelayMs: 700 })
-  ok(d >= 200 && d <= 700, '停顿在配置区间内')
+  // 分条间隔（2026-11-07 改）：旧的 min/max 区间被「模式 + 数值」取代。
+  // 这里只做冒烟：fixed 模式下短句得到一个合理的等待时间。
+  // 两种模式的完整行为在 tests/split-delay-sim.mjs 里测（那里才区分得开「固定」和「按字数」）。
+  const d = partDelayMs('短句', { mode: 'fixed', fixedMs: 500 })
+  ok(d >= 350 && d <= 650, '停顿在配置值附近（含抖动）')
 }
 
 // ---- outbound.js（mock fetch + 假 agent）----

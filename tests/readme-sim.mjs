@@ -51,8 +51,10 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
     splitMaxChars: 120,
     splitMinChars: 4,
     splitMaxParts: 8,
-    splitDelayMinMs: 200,
-    splitDelayMaxMs: 700,
+    splitDelayMode: 'fixed',
+    splitDelayMs: 800,
+    splitDelayPerCharMs: 120,
+    splitDelayMaxCapMs: 3000,
     requestTimeoutMs: 8000,
     wsFallbackPollMs: 30000
   }

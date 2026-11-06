@@ -77,7 +77,7 @@ const fakeState = {
   self: { uin: '3655191092', name: '洛殿下' },
   config: {
     workspaceCwd: 'D:\\DSH workspace\\QQ对话', groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true,
-    splitMaxChars: 120, splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000,
+    splitMaxChars: 120, splitDelayMode: 'fixed', splitDelayMs: 800, pollMs: 2000, groupPollMs: 3000,
     resumeColdSession: true,
     // 0.9.x：概览页会读这些已保存值（读编辑态会把「没保存」显示成「已生效」）
     mergeWindowMs: 2500, replyQuietMs: 5000, closureEnabled: true, memoryEnabled: true,
@@ -149,7 +149,7 @@ seeds = [
   false,
   {
     groupContextCount: 5, groupOnlyWhenAt: true, splitReply: true, splitMaxChars: 120,
-    splitDelayMinMs: 200, splitDelayMaxMs: 700, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true,
+    splitDelayMode: 'fixed', splitDelayMs: 800, pollMs: 2000, groupPollMs: 3000, resumeColdSession: true,
     mergeWindowMs: 2500, mergeMaxWaitMs: 15000, mergeMaxMessages: 10,
     proactiveEnabled: true, proactiveIdleHours: 6, proactiveDailyMax: 1,
     proactiveQuietFrom: '23:00', proactiveQuietTo: '08:00', proactiveBackoffMax: 4,
@@ -227,6 +227,11 @@ ok(stance.includes('合并窗口') && stance.includes('回复前静默'), '对�
 ok(stance.includes('判断收尾') || stance.includes('允许判断收尾'), '对话节奏页有收尾开关')
 ok(stance.includes('怎么分条'), '对话节奏页有「怎么分条」下拉（0.10.0）')
 ok(stance.includes('按换行分'), '下拉里有「按换行分」这个选项')
+// 分条间隔（2026-11-07）：从「高级」挪进「对话节奏」，并改成模式 + 数值。
+// 用户报「连着发消息太急」—— 参数本来就有，但人在「对话节奏」找不到，等于没有。
+ok(stance.includes('分条间隔'), '对话节奏页有「分条间隔」卡片（原来藏在「高级」里）')
+ok(stance.includes('固定间隔') && stance.includes('按字数'), '两种模式都列出来了')
+ok(stance.includes('条与条之间等多久'), '卡片说明了它是干什么的')
 
 // ---- 4. 主动搭话：能选人（0.9.1 新） ----
 const proactive = paint('proactive')
@@ -245,6 +250,44 @@ ok(allModeTree !== null, '全员模式渲染不炸')
 ok(paint('memory').includes('关系记忆'), '记忆页能打开')
 ok(paint('ws').includes('WebSocket') || paint('ws').includes('推送地址'), '配置页能打开')
 ok(paint('advanced').includes('高级设置'), '高级页能打开')
+
+// ---- 5c. 语音四档与合成引擎（0.19.0）----
+// 这一节守的是**真的渲染出来了**，不是「代码里有这个词」——
+// 和 ui-wiring 的分工：那边查文本，这边让 QqBridgeSection 的函数体真的跑一遍。
+{
+  const stanceVoice = paint('stance')
+  ok(stanceVoice.includes('语音模式'), '对话节奏页有「语音模式」卡片')
+  // 四档的定义必须**整句**渲染出来（用户要求「详细举例介绍」，不是只给个名字）
+  ok(stanceVoice.includes('这个模式下ai无语音工具调用权限，无法发语音'), '四档渲染出「禁用」的完整定义')
+  ok(stanceVoice.includes('这个模式下除非你要求，否则ai不会发语音'), '四档渲染出「被动」的完整定义')
+  ok(stanceVoice.includes('实际效果可能和被动模式类似'), '四档渲染出「自由」的完整定义')
+  ok(stanceVoice.includes('除非你要求用文字或者不适合用语音'), '四档渲染出「主动」的完整定义')
+  ok(stanceVoice.includes('重启 DSH'), '四档卡片写明了要重启')
+
+  const adv = paint('advanced')
+  ok(adv.includes('语音合成'), '高级页有「语音合成」卡片')
+  ok(adv.includes('本机 GPT-SoVITS'), '两个引擎都列出来了（本机）')
+  ok(adv.includes('Breeze'), '两个引擎都列出来了（Breeze）')
+  ok(adv.includes('只是「默认引擎」') || adv.includes('默认引擎'), '写明了这只是默认引擎、不拦 MCP')
+
+  const proactVoice = paint('proactive')
+  ok(proactVoice.includes('能使用语音的对象'), '主动搭话页有语音对象名单')
+  // ⚠️ 种子里 voiceMode 是 'off'（默认），这时名单卡**故意**只显示「现在是禁用档」的说明，
+  //    不渲染两张表 —— 因为 off 档下谁都不能用语音，摆一张能勾的表只会误导。
+  //    所以要验「两张表真的在」必须把档位切成非 off，否则测的是另一个分支。
+  ok(proactVoice.includes('现在是「禁用」档'), 'off 档下名单卡写明「谁都不能用」')
+
+  // 切成「自由」档再渲染一次：这时两张表必须都在。
+  // ⚠️ 档位在 **tunables（seeds[7]）** 里，不是 s12 —— s12 是音色搜索/余额那些临时态。
+  //    seeds 数组只预置到索引 9，s10 之后都取各自初始值。
+  const savedTunables = seeds[7]
+  seeds[7] = Object.assign({}, seeds[7], { voiceMode: 'free' })
+  const proactFree = paint('proactive')
+  ok(proactFree.includes('私聊') && proactFree.includes('群聊'), '自由档下名单分成私聊 / 群聊两张表')
+  ok(proactFree.includes('一个都不勾 = 全都能用'), '自由档下写明了空名单 = 不限')
+  ok(proactFree.includes('只对勾选的'), '自由档下能看出「名单非空 = 只对勾选的人」')
+  seeds[7] = savedTunables
+}
 
 // ---- 5b. 「配置」分区：HTTP API 与 WS 两条链路都在（0.15.0） ----
 const configPane = paint('ws')

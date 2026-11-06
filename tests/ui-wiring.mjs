@@ -223,19 +223,40 @@ ok(read('lib/outbound.js').includes("config.splitMode === 'sentence'"), '转发�
 ok(read('docs/QQ对话说明.md').includes('换行 = 另起一条'), '对话说明里告诉了模型「换行就是分条」')
 ok(clientSrc.includes('qqb-warn'), '插件被停用时页面会显式告警')
 
-// ---- 8e. 工具箱分档（0.17.4）：对象字段的五个子键都要有控件 ---------------
+// ---- 8e. 工具箱分档（0.17.4）：对象字段的子键都要有落点 ---------------
 // 前几节按 DEFAULTS 的**顶层键**扫描，toolFeatures 只是一个键，抓不到它的子键；
-// 所以这里单独把五个子键对一遍 —— 漏一个，用户就永远打不开那一档。
+// 所以这里单独把子键对一遍 —— 漏一个，用户就永远打不开那一档。
+//
+// ⚠️ 0.19.0 变更：voiceOut 从「工具箱的复选框」挪去了「对话节奏 → 语音模式」四档。
+//    它不是被删了（qq_send 的 voice 参数在不在 schema 里仍然看它），
+//    而是**真相源换成了 voiceMode**，由 config.js 的 deriveToolFeatures 单向推导。
+//    所以这个键的看守方式必须跟着变：查「有没有复选框」会永远红，
+//    要查的是「它确实由 voiceMode 推导出来」——那才是现在真正要保证的事。
 {
-  const FEATURE_KEYS = ['silence', 'emoji', 'voiceIn', 'voiceOut', 'poke']
+  const FEATURE_KEYS = ['silence', 'emoji', 'voiceIn', 'poke']
   const cfgSrc = read('lib/config.js')
   const defaultsBlock2 = cfgSrc.slice(cfgSrc.indexOf('export const TOOL_FEATURE_DEFAULTS'), cfgSrc.indexOf('export function normalizeToolFeatures'))
   for (const key of FEATURE_KEYS) {
     ok(new RegExp(`^ {2}${key}:`, 'm').test(defaultsBlock2), `TOOL_FEATURE_DEFAULTS 里有 ${key}`)
   }
+  // voiceOut 仍然在默认值里（tool.js 的 featuresOf 按它工作），但不该有复选框
+  ok(/^ {2}voiceOut:/m.test(defaultsBlock2), 'TOOL_FEATURE_DEFAULTS 里仍有 voiceOut（由 voiceMode 推导）')
+  ok(!/row\('voiceOut',/.test(clientSrc), '「工具箱」里**没有** voiceOut 复选框（挪去四档了）')
+  // 推导函数存在，且是单向的：从 voiceMode 算出 voiceOut
+  ok(cfgSrc.includes('export function deriveToolFeatures'), 'config.js 导出 deriveToolFeatures')
+  const deriveBlock = cfgSrc.slice(cfgSrc.indexOf('export function deriveToolFeatures'), cfgSrc.indexOf('export function normalizeToolFeatures'))
+  ok(/base\.voiceOut\s*=\s*String\(config\?\.voiceMode/.test(deriveBlock),
+    'deriveToolFeatures 从 voiceMode 推 voiceOut（单向，不反向写回）')
+  ok(!/config\.voiceMode\s*=/.test(deriveBlock), 'deriveToolFeatures 不反向改写 voiceMode')
   // 子键必须真的接到「工具箱」区块的复选框上（row(...) 的四个参数是 key/标签/说明）
   for (const key of FEATURE_KEYS) {
     ok(new RegExp(`row\\('${key}',`).test(clientSrc), `设置页「工具箱」有 ${key} 的复选框`)
+  }
+  // 四档必须有控件，且是 radio（select 的 option 塞不下那四句定义）
+  ok(/qqb-voice-mode/.test(clientSrc), '设置页有语音四档的 radio 组')
+  ok(clientSrc.includes('function renderVoiceModeCard'), '四档有独立的卡片渲染函数')
+  for (const mode of ['off', 'passive', 'free', 'active']) {
+    ok(new RegExp(`\\['${mode}',`).test(clientSrc), `四档里有 ${mode}`)
   }
   // 嵌套字段必须走自己的 setter —— onField 会把整个对象替换成布尔值
   ok(clientSrc.includes('function onFeature'), '嵌套字段有专用的 onFeature setter')

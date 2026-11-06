@@ -26,8 +26,10 @@ const cfg = JSON.parse(backup)
 cfg.splitReply = true
 cfg.splitMaxChars = 120
 cfg.splitMaxParts = 8
-cfg.splitDelayMinMs = 10
-cfg.splitDelayMaxMs = 20
+cfg.splitDelayMode = 'fixed'
+cfg.splitDelayMs = 10
+// 测试里不需要真等，把上限也压小（它同时兼作「别让用例跑十几秒」的闸）
+cfg.splitDelayMaxCapMs = 20
 // 测试用一个虚构的号，得放开白名单（生产默认是拦着的）
 cfg.allowSendToAny = true
 writeFileSync(CONFIG, JSON.stringify(cfg, null, 2), 'utf8')
