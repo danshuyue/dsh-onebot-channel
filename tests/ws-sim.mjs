@@ -141,6 +141,62 @@ ok(created.length > createdBefore, '断线后自动重连了')
   ok(huge.message_id === '900719925474099312345', '大 message_id 超过 Number 安全范围仍原样保留')
 }
 
+// 6. 回归：stop() 必须真的能关掉连接（2026-11-06，用户报告 WS 相关问题带出来的）
+// 以前 connect() 里有 `let socket = null` 遮蔽了模块级变量，事件回调靠闭包正常，
+// 但 startWs() 返回的停止函数读的是模块级 socket（恒为 null）→ 关不掉，残留 TCP。
+{
+  const before = created.length
+  const stop2 = startWs(() => {})
+  const fresh = created[before]
+  ok(fresh !== undefined, '重新起了一个连接')
+  fresh.open()
+  ok(isWsConnected() === true, '新连接已建立')
+  stop2()
+  ok(fresh.closed === true, 'stop() 之后底层连接被 close()（不能因为变量遮蔽而关不掉）')
+  ok(isWsConnected() === false, 'stop() 之后状态是未连接')
+  // 收拾干净，别影响后面的用例
+  fresh.drop(1000)
+}
+
+// 7. 保障：1006 断连不会被逐次刷屏（去重确实生效）
+//
+// ⚠️ 这条**不是**「修了报告里的 5.2 条」——那一条核验后判定为非 bug（见 lib/ws.js
+//    onclose 里的长注释）：`state.connected === false` 虽然恒真，但去重靠的是
+//    wsDownLogged，它只在 onopen 里重置，所以行为一直是对的。
+//    这条测试留着是为了**防止将来真把它改坏**（比如有人把 wsDownLogged 的重置删了）。
+{
+  const { readFileSync: rf, existsSync: ef } = await import('node:fs')
+  const { homedir: hd } = await import('node:os')
+  const { join: jn } = await import('node:path')
+  const LOAD_LOG = jn(hd(), '.dsh', 'qq-bridge-load.log')
+  const countDisconnects = () => {
+    try {
+      if (!ef(LOAD_LOG)) return 0
+      return rf(LOAD_LOG, 'utf8').split('\n').filter((l) => l.includes('[ws] 连接断开')).length
+    } catch { return 0 }
+  }
+
+  const before7 = created.length
+  const stop3 = startWs(() => {})
+  const s = created[before7]
+  s.open()
+
+  const c0 = countDisconnects()
+  s.drop(1006) // 第一次：应该记一条
+  const c1 = countDisconnects()
+  ok(c1 === c0 + 1, `第一次 1006 记了一条（${c0} → ${c1}）`)
+
+  // 第二次 1006：还没连上就又断了，不该再记
+  const s2 = created[created.length - 1]
+  if (s2 !== undefined && s2 !== s && typeof s2.onclose === 'function') {
+    s2.onclose({ code: 1006, reason: 'dropped again' })
+  }
+  const c2 = countDisconnects()
+  ok(c2 === c1, `第二次 1006 不再重复记（${c1} → ${c2}）`)
+
+  try { stop3() } catch {}
+}
+
 stop()
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed > 0 ? 1 : 0)

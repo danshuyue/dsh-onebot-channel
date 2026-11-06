@@ -206,6 +206,52 @@ node tests/run-isolated.mjs          # 38 个，全绿
 
 ---
 
+## 升级说明（0.18.9）
+
+**「只配 routes、不填 peerUin」的部署，整个入站通路不启动 —— 修了**
+
+用户报告（Ubuntu）：WS 参数配得完全正确，状态页却永远显示「推送未连（轮询兜底）」，
+日志里一条 `[ws]` 都没有。
+
+根因是 `apply()` 里那道**过时的就绪闸门**：
+
+```js
+// 改前
+if (config.token === '' || Number(config.peerUin) <= 0) return note('apply', 'config incomplete (token/peerUin)')
+```
+
+`peerUin` 早就从「唯一私聊目标」退化成**可选别名**了：
+`state.js` 的私聊监听集合 = `routes.private ∪ peerUin(>0 才加)`，
+`allowlist.js` 的白名单私聊 = `peerUin ∪ ownerUin ∪ routes.private`。
+所以「只配 routes、不填 peerUin」是**合法配置**，却被判成 `config incomplete`
+→ 私聊轮询 / 群轮询 / WS 推送**全部不启动**，而 `startWs()` 在 return 之后永远不可达。
+
+修法：闸门只校验 `token`（群监听和 WS 推送都不依赖 peerUin）。日志同时改为
+`config incomplete (token) → 未启动轮询/WS` —— 说清它挡掉了什么，别让人自己猜后果。
+
+**另一个真 bug：WS 连接关不掉**（`lib/ws.js`）
+
+`connect()` 里有个 `let socket = null` **遮蔽**了模块级同名变量。事件回调靠闭包
+捕获局部变量所以功能正常，但 `startWs()` 返回的停止函数读的是模块级 `socket`（恒为 null）
+→ 插件停止/热重载时关不掉连接，残留 TCP。已删掉内层声明。
+
+**一条被判定为非 bug 的（顺带说明）**
+
+报告里还提到 `onclose` 的 `state.connected === false` 恒真、导致去重失效。
+核验后**这条不成立**：那个子条件确实恒真（整个判断退化成 `1006 && wsDownLogged`），
+但去重靠的是 `wsDownLogged`，它只在 `onopen` 里重置 —— 行为一直是对的。
+两种写法只在「`wasConnected===true` 且 `wsDownLogged===true`」时才有分歧，
+而那个状态不可达。所以保留原写法，只在旁边补了注释说明它为什么看起来像 bug 却不是。
+
+回归测试：
+- `tests/apply-gate-sim.mjs` —— 闸门不再含 peerUin、日志文案、**行为求值**
+  （「只配 routes」放行 / 没 token 拦截 / 两者都配也放行）
+- `tests/ws-sim.mjs` 补两条 —— `stop()` 必须真的关掉底层连接（5.1 的变异能抓住）、
+  1006 不会被逐次刷屏
+
+⚠️ 踩坑：第一版 `apply-gate-sim` 真的去调 `apply()`，结果卡死 —— 内部有探活等待（最长 150 秒）
+和 `waitForTools`（10 秒）。改成静态断言 + 条件求值。
+
 ## 升级说明（0.18.8）
 
 **绑定会话的下拉里显示 `#43de6086` 而不是会话名 —— 修了**
