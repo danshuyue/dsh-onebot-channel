@@ -54,6 +54,21 @@ const deliverSrc = read('lib/deliver.js')
 const routeRead = routeKeys.filter((k) => new RegExp(`route\\.${k}\\b`).test(deliverSrc))
 ok(routeRead.length === routeKeys.length, `路由表每个写入字段都有消费方（${routeRead.join('/')}）`)
 
+// ---- 3b. prefix 的**作用域**必须跟消费方一致（2026-11-06）--------------------
+// prefixOf 全仓库只有 poll.js 的私聊路径调用一次；群头是 poll.js 按发送者身份硬拼的。
+// 也就是说 route.prefix 对群聊从来没有消费方。以前的界面却给群表也渲染了输入框，
+// 用户填了以为生效 —— 这正是「群聊前缀到底是干什么的」这个问题的来源。
+// 光删控件不够：后端要是照存，配置里就留着一个永远不生效的值。两头都得钉住。
+// （前端那半边在下面 clientSrc 定义之后再查，见 3c。）
+ok(/export function prefixOf[\s\S]{0,400}?\n}/.test(deliverSrc), 'deliver.js 里仍导出 prefixOf')
+const prefixCallers = libFiles
+  .filter((f) => f !== 'deliver.js')
+  .filter((f) => /prefixOf\(/.test(srcOf(f)))
+ok(prefixCallers.join(',') === 'poll.js', `prefixOf 只被 poll.js 调用（实际：${prefixCallers.join(',') || '无'}）`)
+// 后端：群表不许再收 prefix，私聊表收
+ok(/normalizeRouteTable\(body\.routes\.group,\s*false\)/.test(apiSrc), '群聊路由表不再保存 prefix（它没有消费方）')
+ok(/normalizeRouteTable\(body\.routes\.private,\s*true\)/.test(apiSrc), '私聊路由表仍保留 prefix')
+
 // ---- 4. API 暴露的字段必须在 DEFAULTS 里存在（防拼错/防遗漏改名）-----------
 const publicBlock = apiSrc.slice(apiSrc.indexOf('export function publicConfig'), apiSrc.indexOf('const NUMERIC_FIELDS'))
 const publicKeys = [...publicBlock.matchAll(/^ {4}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
@@ -82,6 +97,26 @@ ok(bogus.length === 0, `可写字段都是真配置${bogus.length ? '，假的�
 
 // ---- 6. 每个可写字段都要在设置页里真的有控件 --------------------------------
 const clientSrc = read('lib/client.js')
+
+// ---- 3c. prefix 作用域：前端那半边（接 3b，需要 clientSrc）------------------
+const tableSrc = clientSrc.slice(clientSrc.indexOf('function renderTable'), clientSrc.indexOf('function onField'))
+ok(tableSrc !== '', '能定位到 renderTable 的函数体')
+ok(tableSrc.includes("kind === 'private'"), '绑定表按私聊/群聊分流渲染前缀格')
+ok(tableSrc.includes('群头自动生成'), '群聊那一格改成了说明文字，不是输入框')
+ok(tableSrc.includes('群聊不需要前缀'), '绑定页写明了「群聊不需要前缀」')
+ok(tableSrc.includes('留空 = 用「高级」里的私聊默认前缀'), '私聊前缀说明了自己与全局默认的关系')
+// 群聊那一格不能还是 input：以前就是「群表也渲染输入框」造成的假配置。
+// 盯的是「群聊分支渲染的是 span」，不是「文件里没有 input」——
+// 私聊分支当然还有 input，全文件搜必然误判。
+// ⚠️ 窗口要够宽：span 的属性（className/key/title）加起来 300+ 字符，
+//    写 {0,200} 会假红（第一次就踩到了）。
+const groupBranch = tableSrc.slice(tableSrc.indexOf(": h('span'"), tableSrc.indexOf("}, '群头自动生成')"))
+ok(groupBranch !== '', '能定位到群聊那一格的 span 分支')
+ok(!groupBranch.includes('qqb-input'), '群聊分支里没有输入框（改成了纯文字说明）')
+ok(!groupBranch.includes('setPrefixOf'), '群聊分支不再写 route.prefix')
+// 「高级」那张卡：三样叫「前缀」的东西要区分开
+ok(clientSrc.includes('这一页有两个「前缀」'), '高级页解释了私聊默认前缀与绑定表前缀的区别')
+ok(clientSrc.includes('第三样东西'), '高级页指出「命令前缀」是另一回事，别混')
 const tunablesBlock = clientSrc.slice(clientSrc.indexOf('setTunables({'), clientSrc.indexOf('})', clientSrc.indexOf('setTunables({')))
 const notLoaded = writable.filter((k) => !new RegExp(`\\b${k}:`).test(tunablesBlock))
 ok(notLoaded.length === 0, `可写字段都进了设置页的表单状态${notLoaded.length ? '，缺：' + notLoaded.join(', ') : ''}`)
