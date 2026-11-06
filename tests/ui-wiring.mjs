@@ -72,7 +72,20 @@ ok(/normalizeRouteTable\(body\.routes\.private,\s*true\)/.test(apiSrc), '私聊�
 // ---- 4. API 暴露的字段必须在 DEFAULTS 里存在（防拼错/防遗漏改名）-----------
 const publicBlock = apiSrc.slice(apiSrc.indexOf('export function publicConfig'), apiSrc.indexOf('const NUMERIC_FIELDS'))
 const publicKeys = [...publicBlock.matchAll(/^ {4}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
-const orphanPublic = publicKeys.filter((k) => !defaultKeys.includes(k))
+/**
+ * 只读派生字段：publicConfig 里算出来的、**故意不是配置键**的那些。
+ *
+ * 为什么需要这个名单：下面那条断言原本把「暴露了但不在 DEFAULTS 里」一律当错误 ——
+ * 那对拼错的键名是对的，但派生字段会被误判。加派生字段时必须在这里说明理由，
+ * 否则就会看到一条红，而那条红的正确解法是「登记」而不是「删掉字段」。
+ */
+const DERIVED_PUBLIC = {
+  // 凭据只回「配没配」，key 本身绝不回传。前端拿它决定输入框的 placeholder。
+  voiceBreezeKeySet: '派生自 voiceBreezeKey，只表示「配了没」，不回传 key 本身'
+}
+const orphanPublic = publicKeys
+  .filter((k) => !(k in DERIVED_PUBLIC))
+  .filter((k) => !defaultKeys.includes(k))
 ok(orphanPublic.length === 0, `API 暴露字段都在 DEFAULTS 里${orphanPublic.length ? '，多余：' + orphanPublic.join(', ') : ''}`)
 
 // ---- 5. 可写字段的分类表必须都指向真配置 ------------------------------------
@@ -94,6 +107,28 @@ const writable = [
 const bogus = writable.filter((k) => !defaultKeys.includes(k))
 ok(writable.length >= 20, `可写字段 ${writable.length} 个`)
 ok(bogus.length === 0, `可写字段都是真配置${bogus.length ? '，假的：' + bogus.join(', ') : ''}`)
+
+// ---- 4b. 反向：可写字段必须真的被 publicConfig 暴露 -------------------------
+//
+// ⚠️ 这条是 0.19.0 装进 profile 之后才补的，起因是一次真实事故：
+//    语音那 12 个配置项（voiceMode / voiceEngine / voiceTargets* / voiceDailyChars /
+//    voiceBreeze* …）进了 DEFAULTS、也进了设置页，**但忘了进 publicConfig**。
+//    后果是「界面能改、改了没用」：前端拿不到初值，后端保存也不落盘。
+//    上面那条 4 号断言查的是「暴露的 → 在 DEFAULTS 里」，方向正好相反，抓不到它；
+//    而 ui-wiring 当时全绿（105 过 0 败），于是这个洞一路漏到了实机才知道。
+//
+// 排除项：有正当理由不暴露的键。
+const INTENTIONALLY_UNEXPOSED = {
+  // 凭据绝不回传 —— 前端只读 voiceBreezeKeySet 这个布尔。见 api.js 的注释。
+  voiceBreezeKey: '凭据，绝不回显（前端读 voiceBreezeKeySet 布尔）'
+}
+{
+  const notPublic = writable
+    .filter((k) => !(k in INTENTIONALLY_UNEXPOSED))
+    .filter((k) => !publicKeys.includes(k))
+  ok(notPublic.length === 0,
+    `⚠️ 可写字段都在 publicConfig 里（否则界面能改、改了不生效）${notPublic.length ? '，缺：' + notPublic.join(', ') : ''}`)
+}
 
 // ---- 6. 每个可写字段都要在设置页里真的有控件 --------------------------------
 const clientSrc = read('lib/client.js')
