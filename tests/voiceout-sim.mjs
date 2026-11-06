@@ -10,7 +10,7 @@
  *
  * 隔离：临时 HOME，fetch 被替换，不碰真 ~/.dsh、不碰真协议端。
  */
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync, lstatSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync, lstatSync, existsSync, copyFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -167,15 +167,53 @@ console.log('\n3. 非音频 / 坏文件在**上传前**就拒掉（不发请求�
   }
 }
 
-console.log('\n3b. 空的语音目录配置关闭本机读取：')
+console.log('\n3b. 语音目录：off 关掉、留空用默认位置：')
 {
   const original = getConfig().voiceOutputDir
   calls.length = 0
-  getConfig().voiceOutputDir = ''
+  // 2026-11-06 语义变更：空串不再表示「禁止」，而是「用默认位置（工作区/voice）」。
+  // 真正关闭本机语音读取的开关是 "off"，所以这里改成钉 off。
+  getConfig().voiceOutputDir = 'off'
   const result = await voiceout.uploadVoiceFile(WAV)
-  ok(result.ok === false && String(result.error).includes('未配置语音输出目录'), '未配置输出目录时拒绝读取')
-  ok(calls.length === 0, '未配置输出目录时不发请求')
+  ok(result.ok === false && String(result.error).includes('语音发送已关闭'), '设成 off 时拒绝读取本机语音')
+  ok(calls.length === 0, '设成 off 时不发请求')
   getConfig().voiceOutputDir = original
+}
+
+console.log('\n3c. 留空 → 默认落在 <工作区>/voice，目录自动创建，但 containment 不放松：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const originalWs = config.workspaceCwd
+  const sandbox = join(SANDBOX_HOME, 'voice-default-case')
+  config.voiceOutputDir = ''
+  config.workspaceCwd = sandbox
+
+  ok(existsSync(join(sandbox, 'voice')) === false, '前置：默认目录此刻还不存在')
+  const root = voiceout.voiceOutputRoot()
+  ok(root.ok === true, `留空时能解析出默认目录（实际 ${root.ok ? root.dir : root.error}）`)
+  ok(root.ok === true && root.dir === join(sandbox, 'voice'), '默认目录 = <工作区>/voice')
+  ok(existsSync(join(sandbox, 'voice')) === true, '默认目录被自动创建')
+
+  // 默认目录里的音频能发出去 —— 证明它真的是信任根
+  const inDefault = join(sandbox, 'voice', 'ok.wav')
+  copyFileSync(WAV, inDefault)
+  calls.length = 0
+  uploadStep1 = { retcode: 0, status: 'ok', data: { type: 'stream', status: 'chunk_received' } }
+  uploadStep2 = { retcode: 0, status: 'ok', data: { type: 'response', status: 'file_complete', file_path: 'C:\\remote\\voice-default.wav' } }
+  const sent = await voiceout.uploadVoiceFile(inDefault)
+  ok(sent.ok === true, `默认目录里的音频能发出去（实际 ${sent.ok ? 'ok' : sent.error}）`)
+
+  // 但默认目录**外面**的文件仍要被拒 —— 给默认值不等于放松 containment
+  const outsideDefault = join(sandbox, 'not-in-voice.wav')
+  copyFileSync(WAV, outsideDefault)
+  calls.length = 0
+  const refused = await voiceout.uploadVoiceFile(outsideDefault)
+  ok(refused.ok === false && String(refused.error).includes('必须位于配置的 TTS 输出目录内'), '默认目录之外的文件仍被拒绝')
+  ok(calls.length === 0, '被拒时没有发出任何请求')
+
+  config.voiceOutputDir = originalDir
+  config.workspaceCwd = originalWs
 }
 
 console.log('\n4. 上传各阶段失败都不抛：')

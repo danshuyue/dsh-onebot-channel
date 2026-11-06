@@ -98,5 +98,40 @@ sent.length = 0
 await sendToQQ(target, '', { segments: ['一句话说完'] })
 eq(sent.length, 1, '只给一段就发一条')
 
+// 6. maxParts = 1 强制只发一条（2026-11-06）
+// 用户报「怎么分条都限制不了一整条」。查下来 splitMessage 的 while 循环理论上能压到 1，
+// 但那是「反复合并最短相邻两段」的副作用，不是承诺。现在给了明确短路，这里钉死它。
+{
+  const { splitMessage } = await import('../lib/split.js')
+  const multiLine = '第一句。第二句。\n第三行。\n第四行。'
+  const one = splitMessage(multiLine, { mode: 'paragraph', maxParts: 1, maxChars: 120, minChars: 4 })
+  eq(one.length, 1, 'maxParts=1 → 只返回 1 条（paragraph）')
+  ok(one[0].includes('\n'), 'maxParts=1 时原文的换行被保留（不是把各行粘成一句）')
+  ok(one[0].trim() === multiLine.trim(), 'maxParts=1 时内容与原文一致')
+
+  const oneSentence = splitMessage('第一句。第二句。第三句。', { mode: 'sentence', maxParts: 1, maxChars: 120, minChars: 4 })
+  eq(oneSentence.length, 1, 'maxParts=1 → 只返回 1 条（sentence 模式也一样）')
+
+  // 10 行也压得成 1 条（防「合并策略改了以后收敛不到 1」）
+  const ten = splitMessage('a\nb\nc\nd\ne\nf\ng\nh\ni\nj', { mode: 'paragraph', maxParts: 1, maxChars: 120, minChars: 4 })
+  eq(ten.length, 1, 'maxParts=1 时 10 行也压成 1 条')
+
+  // 端到端：配置成 1 之后真的只发一条
+  const { getConfig } = await import('../lib/config.js')
+  const cfg = getConfig()
+  const originalMax = cfg.splitMaxParts
+  const originalMode = cfg.splitMode
+  const originalReply = cfg.splitReply
+  cfg.splitReply = true
+  cfg.splitMode = 'sentence'
+  cfg.splitMaxParts = 1
+  sent.length = 0
+  await sendToQQ(target, '第一句。第二句。第三句。', {})
+  eq(sent.length, 1, '配置 splitMaxParts=1 时端到端只发一条')
+  cfg.splitMaxParts = originalMax
+  cfg.splitMode = originalMode
+  cfg.splitReply = originalReply
+}
+
 console.log(`\n${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
