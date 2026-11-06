@@ -180,23 +180,28 @@ console.log('\n3b. 语音目录：off 关掉、留空用默认位置：')
   getConfig().voiceOutputDir = original
 }
 
-console.log('\n3c. 留空 → 默认落在 <工作区>/voice，目录自动创建，但 containment 不放松：')
+console.log('\n3c. 留空 → 默认落在 DATA_DIR/voice（不落工作区），目录自动创建：')
 {
   const config = getConfig()
   const originalDir = config.voiceOutputDir
   const originalWs = config.workspaceCwd
   const sandbox = join(SANDBOX_HOME, 'voice-default-case')
+  mkdirSync(sandbox, { recursive: true })
   config.voiceOutputDir = ''
   config.workspaceCwd = sandbox
 
-  ok(existsSync(join(sandbox, 'voice')) === false, '前置：默认目录此刻还不存在')
+  // 默认目录**故意不落工作区**：工作区是 agent 自己可写的地方，
+  // 默认目录落在那儿等于给它一条「自己写文件、自己念出来发出去」的旁路。
+  const expected = join(SANDBOX_DATA, 'voice')
+  ok(existsSync(expected) === false, '前置：默认目录此刻还不存在')
   const root = voiceout.voiceOutputRoot()
   ok(root.ok === true, `留空时能解析出默认目录（实际 ${root.ok ? root.dir : root.error}）`)
-  ok(root.ok === true && root.dir === join(sandbox, 'voice'), '默认目录 = <工作区>/voice')
-  ok(existsSync(join(sandbox, 'voice')) === true, '默认目录被自动创建')
+  ok(root.ok === true && root.dir === expected, `默认目录 = DATA_DIR/voice（实际 ${root.ok ? root.dir : root.error}）`)
+  ok(root.ok === true && root.dir.startsWith(sandbox) === false, '默认目录**不在**工作区里')
+  ok(existsSync(expected) === true, '默认目录被自动创建')
 
   // 默认目录里的音频能发出去 —— 证明它真的是信任根
-  const inDefault = join(sandbox, 'voice', 'ok.wav')
+  const inDefault = join(expected, 'ok.wav')
   copyFileSync(WAV, inDefault)
   calls.length = 0
   uploadStep1 = { retcode: 0, status: 'ok', data: { type: 'stream', status: 'chunk_received' } }
@@ -214,6 +219,19 @@ console.log('\n3c. 留空 → 默认落在 <工作区>/voice，目录自动创�
 
   config.voiceOutputDir = originalDir
   config.workspaceCwd = originalWs
+}
+
+console.log('\n3c-2. 显式配置的目录不存在时**不**自动创建（打错的路径要报错）：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const typo = join(SANDBOX_HOME, 'tts-oot-typo')
+  config.voiceOutputDir = typo
+  const root = voiceout.voiceOutputRoot()
+  ok(root.ok === false, '显式配置的不存在目录 → ok:false')
+  ok(String(root.error).includes('不存在'), `错因说清是路径不存在（实际「${root.error}」）`)
+  ok(existsSync(typo) === false, '**没有**替用户把打错的目录建出来')
+  config.voiceOutputDir = originalDir
 }
 
 console.log('\n3d. 边界：off 大小写不敏感、配成已存在的文件要报错而不是静默：')
@@ -263,6 +281,101 @@ console.log('\n3e. 目录已存在时不再重复 mkdir（幂等，不因已存�
 
   config.voiceOutputDir = originalDir
   config.workspaceCwd = originalWs
+}
+
+console.log('\n3f. 大小上限真的拦得住（2026-11-06 审核发现此前零覆盖）：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const bigDir = join(SANDBOX_HOME, 'voice-big')
+  mkdirSync(bigDir, { recursive: true })
+  config.voiceOutputDir = bigDir
+
+  // 造一个结构合法但超限的 WAV：RIFF 头对，size 字段按实际长度算，
+  // 这样它不会被 validateVoiceBytes 挡掉 —— 我们要测的是「大小」这一关。
+  const tooBig = join(bigDir, 'too-big.wav')
+  const size = voiceout.MAX_VOICE_BYTES + 1024
+  const head = Buffer.alloc(44)
+  head.write('RIFF', 0, 'ascii')
+  head.writeUInt32LE(size - 8, 4)
+  head.write('WAVEfmt ', 8, 'ascii')
+  head.writeUInt32LE(16, 16)
+  head.writeUInt16LE(1, 20)
+  head.writeUInt16LE(1, 22)
+  head.writeUInt32LE(8000, 24)
+  head.writeUInt32LE(16000, 28)
+  head.writeUInt16LE(2, 32)
+  head.writeUInt16LE(16, 34)
+  head.write('data', 36, 'ascii')
+  head.writeUInt32LE(size - 44, 40)
+  writeFileSync(tooBig, Buffer.concat([head, Buffer.alloc(size - 44)]))
+
+  calls.length = 0
+  const r = await voiceout.uploadVoiceFile(tooBig)
+  ok(r.ok === false, '超限文件 → ok:false')
+  ok(String(r.error).includes('太大'), `错因说清是大小（实际「${r.error}」）`)
+  ok(calls.length === 0, '超限时不发任何请求（不是传完再拒）')
+
+  config.voiceOutputDir = originalDir
+}
+
+console.log('\n3g. workspaceCwd 为空时默认目录仍落 DATA_DIR（不抛、不落当前目录）：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const originalWs = config.workspaceCwd
+  config.voiceOutputDir = ''
+
+  for (const ws of ['', null, undefined]) {
+    config.workspaceCwd = ws
+    const r = voiceout.voiceOutputRoot()
+    ok(r.ok === true, `workspaceCwd=${JSON.stringify(ws)} 时仍能解析出默认目录`)
+    ok(r.ok === true && r.dir === join(SANDBOX_DATA, 'voice'), `workspaceCwd=${JSON.stringify(ws)} 时落到 DATA_DIR/voice`)
+    ok(r.ok === true && r.dir.includes('..') === false, `workspaceCwd=${JSON.stringify(ws)} 时结果里没有 ..（不是相对路径）`)
+  }
+
+  config.voiceOutputDir = originalDir
+  config.workspaceCwd = originalWs
+}
+
+console.log('\n3h. 语音内容审计：结构合法但 data 里藏着本机路径 / 凭据 → 拒（2026-11-06 审核发现零覆盖）：')
+{
+  const config = getConfig()
+  const originalDir = config.voiceOutputDir
+  const leakDir = join(SANDBOX_HOME, 'voice-leak')
+  mkdirSync(leakDir, { recursive: true })
+  config.voiceOutputDir = leakDir
+
+  // 造一个**结构完全合法**的 WAV，只在 data 块里塞秘密文本。
+  // validateVoiceBytes 只看容器结构，所以它能过；内容审计是第二道闸。
+  const secret = 'C:\\Users\\Yansunsky\\.dsh\\qq-bridge.config.json sk-abcdefghijklmnopqrstuvwxyz123456'
+  const body = Buffer.from(secret, 'latin1')
+  const n = body.length + (body.length % 2) // data 块长度取偶数，保证 off===end
+  const leakWav = Buffer.alloc(44 + n, 0)
+  leakWav.write('RIFF', 0, 'ascii')
+  leakWav.writeUInt32LE(36 + n, 4)
+  leakWav.write('WAVEfmt ', 8, 'ascii')
+  leakWav.writeUInt32LE(16, 16)
+  leakWav.writeUInt16LE(1, 20)
+  leakWav.writeUInt16LE(1, 22)
+  leakWav.writeUInt32LE(8000, 24)
+  leakWav.writeUInt32LE(16000, 28)
+  leakWav.writeUInt16LE(2, 32)
+  leakWav.writeUInt16LE(16, 34)
+  leakWav.write('data', 36, 'ascii')
+  leakWav.writeUInt32LE(n, 40)
+  body.copy(leakWav, 44)
+  const leakPath = join(leakDir, 'innocent.wav')
+  writeFileSync(leakPath, leakWav)
+
+  calls.length = 0
+  const r = await voiceout.uploadVoiceFile(leakPath)
+  ok(r.ok === false, '结构合法但含本机路径的 WAV → ok:false')
+  ok(String(r.error).includes('敏感'), `错因说清是敏感内容（实际「${r.error}」）`)
+  ok(String(r.error).includes('sk-abcdefghijklmnopqrstuvwxyz123456') === false, '错因里不带凭据原文（打码了）')
+  ok(calls.length === 0, '被拒时不发任何请求')
+
+  config.voiceOutputDir = originalDir
 }
 
 console.log('\n4. 上传各阶段失败都不抛：')
