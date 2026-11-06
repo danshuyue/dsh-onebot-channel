@@ -312,5 +312,22 @@ ok(clientSrc.includes('qqb-warn'), '插件被停用时页面会显式告警')
 ok(!clientSrc.includes('可以在这里给某个号新建会话'), '顶部注释不再声称有「新建会话」')
 ok(!clientSrc.includes('新配置下一轮轮询生效'), '保存提示不再说「下一轮轮询生效」')
 
+// ---- 10. 余额：配了 key 就自动查，别让人自己想起来点按钮（2026-11-07）-------
+//
+// 用户反馈「余额查不到」。查下来接口和后端都正常，真正的问题是**观感**：
+// 卡片上写着「（点一下查）」，而这张卡只在引擎选中 Breeze 时才渲染
+// —— 用户切过去还得自己想起来点那个「刷新」。
+// 所以：加载时若 key 已配就自动查一次，占位文案也跟着改成「查询中…」。
+{
+  ok(clientSrc.includes('if (hasKey) {'), '配了 key 的加载路径里有自动查余额的分支')
+  ok(clientSrc.includes("apiPost('/voice-balance', {})"), '自动查余额走的是 /voice-balance')
+  // ⚠️ 只查「作为字符串字面量出现」的旧文案，不查注释 ——
+  //    注释里会引述旧行为来说明为什么改（那是文档，不是残留）。
+  ok(!clientSrc.includes("'（点一下查）'"), '占位文案不再写「（点一下查）」（已经自动查了）')
+  // 自动查要静默失败：用户没主动问，弹红字反而像出故障了
+  const autoBlock = clientSrc.slice(clientSrc.indexOf('if (hasKey) {'), clientSrc.indexOf('if (hasKey) {') + 1200)
+  ok(autoBlock.includes('静默'), '自动查余额失败时保持静默（用户没主动问）')
+}
+
 process.stdout.write(`\n${pass} 过 ${fail} 败\n`)
 process.exit(fail === 0 ? 0 : 1)
