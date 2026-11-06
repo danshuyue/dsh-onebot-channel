@@ -206,6 +206,36 @@ node tests/run-isolated.mjs          # 38 个，全绿
 
 ---
 
+## 升级说明（0.18.8）
+
+**绑定会话的下拉里显示 `#43de6086` 而不是会话名 —— 修了**
+
+用户截图：下拉里是 `#43de6086`，看不到是哪个会话。
+
+两条**独立缺陷**叠出来的：
+
+1. **`inject` 里没有 `sessionTitle`**。`listLiveSessions` 要问它拿折叠后的标题，
+   但没声明 inject 时 `serviceOf(ctx,'sessionTitle')` 会抛
+   `cannot get property ... without inject`，被 catch 吞掉 → 只靠 `session.title` 兜底。
+2. **活着的会话对象上没有 `title` 字段**（标题在投影里，必须问那个服务）。
+
+于是活会话的标题恒为空。而扫盘兜底 `scanSessionDirs(workspaceCwd)` 在
+`workspaceCwd` 为空时返回空 —— 两条路同时空，前端 `sessionLabel` 就兜底成 `#` + id 前 8 位。
+
+修法：
+
+- `inject` 补 `sessionTitle`（同一个坑，`agentPresets` 当年也是这么补的）
+- 新增 `titleByIdFromDisk(id)`：**按 id** 去落盘目录里找标题，不依赖任何配置。
+  `listWorkspaceSessions` 对标题仍为空的会话调它补一句。
+  ⚠️ 只对空标题按需调用，且只 stat 少数几个候选目录 —— **不整树扫描**。
+  实测整树扫全部工作区是 342 个会话 / 8.3 秒，那会把 `/state` 拖回卡死状态
+  （0.18.7 刚修掉的就是这个）；而按 id 找是 **0.2ms**。
+
+回归测试 `tests/session-title-sim.mjs`：
+钉住 inject 声明、`titleByIdFromDisk` 的正反用例与速度、以及
+「活会话没标题时 listWorkspaceSessions 会补上」。
+变异验证：删掉 inject 里的 `sessionTitle`（1 条红）、去掉补标题的兜底（2 条红）。
+
 ## 升级说明（0.18.7）
 
 **没连上 SnowLuma 时，设置页不再卡「加载中…」很久**
