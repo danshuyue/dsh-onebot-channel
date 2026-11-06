@@ -76,7 +76,10 @@ function baseConfig(extra = {}) {
     voiceBreezeKey: 'brz_k',
     voiceBreezeVoice: 'voc_v',
     voiceBreezeFormat: 'wav',
-    voiceTargetsPrivate: [],
+    // ⚠️ 2026-11-07 语义反转：空名单从「全放开」改成「谁都不能用」。
+    //    所以测试要放行某个目标，就必须**显式把它列进名单** ——
+    //    这正是新语义想要的效果（默认谁都别想触发付费合成）。
+    voiceTargetsPrivate: [gate.targetKey(TARGET)],
     voiceTargetsGroup: [],
     voiceDailyChars: 20,
     ...extra
@@ -174,10 +177,17 @@ console.log('\n6. 对象名单：')
   ok(fetchCalls === 0, '也没有网络请求')
   ok(String(blocked.error).includes('没开语音'), '错误说得清是名单问题', blocked.error)
 
-  // 私聊名单不影响群（群名单空 = 放行）
-  const groupCfg = baseConfig({ voiceDailyChars: 0, voiceTargetsPrivate: ['private:999'], voiceTargetsGroup: [] })
-  const groupAllowed = gate.targetAllowed({ kind: 'group', id: '975663147' }, groupCfg)
-  ok(groupAllowed.ok === true, '私聊名单不牵连群')
+  // 两张名单**互相独立**：私聊名单里有什么，都不影响群名单的判定。
+  // ⚠️ 语义反转后这条也要跟着改：不能再断言「群名单空 = 放行」——
+  //    空名单现在一律是「谁都不能用」。要验的是「群看到的是自己的那张表」。
+  const onlyPrivate = baseConfig({ voiceDailyChars: 0, voiceTargetsPrivate: ['private:999'], voiceTargetsGroup: [] })
+  ok(gate.targetAllowed({ kind: 'group', id: '975663147' }, onlyPrivate).ok === false,
+    '只勾了私聊时，群**不会**因为私聊名单被连带放行')
+
+  const onlyGroup = baseConfig({ voiceDailyChars: 0, voiceTargetsPrivate: [], voiceTargetsGroup: ['group:975663147'] })
+  ok(gate.targetAllowed({ kind: 'group', id: '975663147' }, onlyGroup).ok === true, '勾了群就放行这个群')
+  ok(gate.targetAllowed({ kind: 'private', id: '1321833118' }, onlyGroup).ok === false,
+    '只勾了群时，私聊**不会**被连带放行（两张表独立）')
 }
 
 console.log('\n7. 「禁用」档即使名单放行也拒：')

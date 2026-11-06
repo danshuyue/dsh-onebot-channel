@@ -284,7 +284,9 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   seeds[7] = Object.assign({}, seeds[7], { voiceMode: 'free' })
   const proactFree = paint('proactive')
   ok(proactFree.includes('私聊') && proactFree.includes('群聊'), '自由档下名单分成私聊 / 群聊两张表')
-  ok(proactFree.includes('一个都不勾 = 全都能用'), '自由档下写明了空名单 = 不限')
+  // 语义在 2026-11-07 反转了：空名单从「全放开」改成「谁都不能用」（用户要求，更符合直觉，
+  // 而且语音会花钱 —— 默认放行所有人是危险的那一侧）。
+  ok(proactFree.includes('一个都没勾 = 谁都不能用'), '自由档下写明了空名单 = 谁都不能用')
   ok(proactFree.includes('只对勾选的'), '自由档下能看出「名单非空 = 只对勾选的人」')
   seeds[7] = savedTunables
 }

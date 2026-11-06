@@ -233,6 +233,16 @@ results.push(mutate(
 ))
 
 both('')
+both('变异 11：语音失败不兜住（= 2026-11-07「正文发两遍」那个 bug）')
+results.push(mutate(
+  '语音失败连累整次发送',
+  'lib/tool.js',
+  '            try {\n              const voiceResult = await sendVoiceToQQ(target, voicePath)',
+  '            {\n              const voiceResult = await sendVoiceToQQ(target, voicePath)',
+  'voice-fail-sim.mjs'
+))
+
+both('')
 const caught = results.filter((r) => r.skipped !== true && r.passed === false).length
 const leaked = results.filter((r) => r.skipped !== true && r.passed === true).length
 const skipped = results.filter((r) => r.skipped === true).length
