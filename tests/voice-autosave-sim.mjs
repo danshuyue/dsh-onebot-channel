@@ -284,5 +284,119 @@ console.log('\n5. 版式：绑定行的第 1 列必须带像素下限，粘住�
   ok(sticky.includes('z-index'), '有 z-index（不然会被下面的卡片盖住）')
 }
 
+console.log('\n6. 防抖与串行（行为级 —— 把那段代码真的跑一遍）：')
+{
+  // 前面的断言全是「源码里有这句话」。防抖和串行是**时序行为**，
+  // 源码断言证明不了：把 DELAY 改成 0、把 clearTimeout 删掉、把串行链拆掉，
+  // 源码都「看起来还对」。所以这里把 client.js 里那一段切出来，
+  // 用假 apiPost + 真计时器重建，然后真的调 queueVoiceSave / flushVoiceSave。
+  const start = clientSrc.indexOf('var VOICE_AUTOSAVE_KEYS = [')
+  const end = clientSrc.indexOf('function reload() {')
+  ok(start >= 0 && end > start, '能从 client.js 切出「改完即存」那一段')
+  const body = start >= 0 && end > start ? clientSrc.slice(start, end) : ''
+
+  const build = (delayFor) => {
+    const posts = []
+    const states = []
+    const makePost = (path, patch) => {
+      const seq = posts.length
+      const entry = { path, patch, startedAt: Date.now(), finishedAt: 0 }
+      posts.push(entry)
+      const delay = delayFor === undefined ? 0 : delayFor(patch, seq)
+      return new Promise((resolve, reject) => {
+        setTimeout(() => {
+          entry.finishedAt = Date.now()
+          if (delay < 0) reject(new Error('模拟失败'))
+          else resolve({ ok: true })
+        }, Math.abs(delay))
+      })
+    }
+    // eslint-disable-next-line no-new-func
+    const factory = new Function(
+      'useRef', 'apiPost', 'setVoiceState', 'refreshBalance', 'errText',
+      body + '\nreturn { queueVoiceSave, flushVoiceSave, VOICE_AUTOSAVE_DELAY_MS, voiceSavePending }'
+    )
+    const api = factory(
+      (initial) => ({ current: initial }),
+      makePost,
+      (patch) => { states.push(patch) },
+      () => {},
+      (error) => String(error && error.message ? error.message : error)
+    )
+    return { api, posts, states }
+  }
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  {
+    // ① 500ms 内的三次改动合并成一次 POST，且带的是最后一次的值
+    const h1 = build()
+    ok(h1.api.VOICE_AUTOSAVE_DELAY_MS >= 200, `防抖不是 0（实际 ${h1.api.VOICE_AUTOSAVE_DELAY_MS}ms）`)
+    h1.api.queueVoiceSave('voiceBreezeSpeed', 0.75)
+    h1.api.queueVoiceSave('voiceBreezeSpeed', 0.85)
+    h1.api.queueVoiceSave('voiceBreezeSpeed', 1)
+    await sleep(h1.api.VOICE_AUTOSAVE_DELAY_MS + 200)
+    eq(h1.posts.length, 1, '连改三次只发一次 POST（防抖生效）')
+    eq(h1.posts[0]?.patch, { voiceBreezeSpeed: 1 }, '发出去的是最后一次的值')
+  }
+
+  {
+    // ② 不同键在同一次 flush 里合并成同一个 patch
+    const h2 = build()
+    h2.api.queueVoiceSave('voiceBreezeSpeed', 0.9)
+    h2.api.queueVoiceSave('voiceBreezeVolume', 1)
+    await sleep(h2.api.VOICE_AUTOSAVE_DELAY_MS + 200)
+    eq(h2.posts.length, 1, '两个键一次发')
+    eq(Object.keys(h2.posts[0]?.patch ?? {}).sort(), ['voiceBreezeSpeed', 'voiceBreezeVolume'],
+      '两个键都在同一个 patch 里')
+  }
+
+  {
+    // ③ key 留空不提交（后端语义是「空 = 保持原样」）
+    const h3 = build()
+    h3.api.queueVoiceSave('voiceBreezeKey', '   ')
+    await sleep(h3.api.VOICE_AUTOSAVE_DELAY_MS + 200)
+    eq(h3.posts.length, 0, 'key 只填空格时一个请求都不发')
+  }
+
+  {
+    // ④ 串行：第一条慢、第二条快 —— 没有串行链的话第二条会先到，
+    //    同一个键的旧值就会覆盖新值（界面显示 v2、配置里是 v1）。
+    const h4 = build((patch, seq) => (seq === 0 ? 120 : 0))
+    h4.api.queueVoiceSave('voiceBreezeSpeed', 0.75)
+    h4.api.flushVoiceSave()
+    h4.api.queueVoiceSave('voiceBreezeSpeed', 1)
+    h4.api.flushVoiceSave()
+    await sleep(400)
+    eq(h4.posts.length, 2, '两次 flush 都发出去了')
+    ok(h4.posts[1].startedAt >= h4.posts[0].finishedAt,
+      `第二条在上一条完成之后才开始（第一条 ${h4.posts[0].startedAt}→${h4.posts[0].finishedAt}，第二条 ${h4.posts[1].startedAt}）`)
+    eq(h4.posts[1]?.patch, { voiceBreezeSpeed: 1 }, '最后落地的是新值')
+  }
+
+  {
+    // ⑤ 上一条失败不能把后面的改动卡死（用户改完一格网络抖了一下，
+    //    下一格还得能存住）
+    const h5 = build((patch, seq) => (seq === 0 ? -1 : 0))
+    h5.api.queueVoiceSave('voiceBreezeSpeed', 0.75)
+    h5.api.flushVoiceSave()
+    h5.api.queueVoiceSave('voiceBreezeSpeed', 1)
+    h5.api.flushVoiceSave()
+    await sleep(300)
+    eq(h5.posts.length, 2, '第一条失败后第二条照样发')
+    ok(h5.states.some((s) => s.saveState === 'error'), '失败会显示在卡片上')
+    ok(h5.states.some((s) => s.saveState === 'saved'), '后面那次成功也会显示')
+  }
+
+  {
+    // ⑥ 卸载收尾（silent）照样把待发的改动发出去，但不去写界面状态
+    const h6 = build()
+    h6.api.queueVoiceSave('voiceBreezeSpeed', 0.75)
+    h6.api.flushVoiceSave(true)
+    await sleep(150)
+    eq(h6.posts.length, 1, '卸载时待发的改动仍然发出去了（不会凭空消失）')
+    eq(h6.states.length, 0, 'silent 时不写界面状态（组件已经没了）')
+  }
+}
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed > 0 ? 1 : 0)

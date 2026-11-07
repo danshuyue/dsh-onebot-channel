@@ -128,7 +128,16 @@ console.log('\n5. 前端有「加载慢」的提示（不是干等一个「加�
   const clientSrc = readFileSync(join(PLUGIN, 'lib', 'client.js'), 'utf8')
   ok(/setTimeout\(function \(\) \{[\s\S]{0,600}?没连上 SnowLuma/.test(clientSrc), '超过 2 秒会显示「可能没连上 SnowLuma」')
   ok(clientSrc.includes('clearSlowTimer'), '成功/失败/卸载时都会清掉计时器')
-  ok(/return clearSlowTimer/.test(clientSrc), '组件卸载时清计时器')
+  // 0.19.5：卸载清理从「直接 return clearSlowTimer」变成了一个函数 —— 它还要顺手
+  // 把「改完即存」队列里没发出去的那点改动 flush 掉（否则防抖没到就切走，改动凭空消失）。
+  // 所以这里不能只查 `return clearSlowTimer` 这个字面量，要查清理函数里两件事都做了。
+  {
+    const cleanupAt = clientSrc.indexOf('return function () {')
+    const cleanup = cleanupAt >= 0 ? clientSrc.slice(cleanupAt, cleanupAt + 400) : ''
+    ok(cleanup.includes('clearSlowTimer()'), '组件卸载时清掉「加载慢」的计时器')
+    ok(/flushVoiceSave\(/.test(cleanup), '组件卸载时把没发出去的语音配置改动 flush 掉')
+    ok(/clearTimeout\(voiceSaveTimer\.current\)/.test(cleanup), '卸载时先取消待触发的防抖计时器，再 flush')
+  }
   ok(/msg === '' \? null/.test(clientSrc), 'loading 分支会显示那句提示')
 }
 

@@ -317,10 +317,13 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   ok(adv.includes('导出日志'), '高级页有「导出日志」卡片')
   {
     let anchor = null
+    let cfgAnchor = null
     const walk = (node) => {
-      if (anchor !== null || node === null || typeof node !== 'object') return
+      if (node === null || typeof node !== 'object') return
       if (Array.isArray(node)) { for (const child of node) walk(child); return }
-      if (node.type === 'a' && String(node.props?.href ?? '').includes('/log-file')) { anchor = node; return }
+      const href = String(node.props?.href ?? '')
+      if (node.type === 'a' && anchor === null && href.includes('/log-file')) { anchor = node }
+      if (node.type === 'a' && cfgAnchor === null && href.includes('/config-export')) { cfgAnchor = node }
       for (const child of node.children || []) walk(child)
     }
     seeds[8] = 'advanced'
@@ -331,6 +334,12 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
     ok(String(anchor?.props?.download ?? '') !== '', '链接带 download —— 点一下是另存为，不是把日志刷在标签页里')
     ok(adv.includes('QQ 号') && (adv.includes('没有 key') || adv.includes('不含 key')),
       '写明了日志里有什么（有 QQ 号、没有 key）—— 用户要把它发出来，得先知道这一点')
+    // 导出配置（0.19.6，用户要求「导出日志时顺带导出配置」）：
+    // 少了配置那一半，排查「发错群」时只看得到「发给了谁」、看不到「当时配的是谁」。
+    ok(cfgAnchor !== null, '导出卡片里也有指向 /config-export 的下载链接')
+    ok(String(cfgAnchor?.props?.download ?? '').includes('.json'),
+      '配置下载下来是 .json（不是把 JSON 刷在标签页里）')
+    ok(adv.includes('打码') || adv.includes('已设置'), '写明了凭据会打码 —— 用户才敢把它发出来')
   }
 
   const proactVoice = paint('proactive')

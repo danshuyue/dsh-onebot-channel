@@ -13,7 +13,7 @@
  */
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
 import { useIsolatedHome } from './isolated-home.mjs'
 
 const PLUGIN = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -183,6 +183,89 @@ console.log('\n4. 只认 GET（POST 不该也能下载）：')
   await handler({ url: '/api/qq-bridge/log-file', method: 'POST' }, res)
   const text = Buffer.isBuffer(res.body) ? res.body.toString('utf8') : String(res.body ?? '')
   ok(res.statusCode !== 200 || !text.startsWith('x'), `POST 拿不到日志（实际 ${res.statusCode}）`)
+}
+
+// ---------------------------------------------------------------------------
+// 5. 导出配置（0.19.6，用户要求「导出日志时顺带导出当前插件配置」）
+//
+// 为什么它值得单独钉：这份 JSON 的用途是**发给别人看**（用户会贴进对话），
+// 所以它同时是「诊断材料」和「泄密面」。两条要求互相拉扯：
+//   ① 必须够全 —— routes / groupUins / 各档位，少了就诊断不了「发错人」
+//   ② 凭据必须打码 —— token / wsToken / voiceBreezeKey 一个字符都不能出去
+// 只断言「有 config 字段」是假绿（漏掉某个凭据照样绿），所以逐字段验。
+// ---------------------------------------------------------------------------
+console.log('\n5. 导出配置：够诊断、但不吐凭据：')
+{
+  // 先把三个凭据写成可识别的哨兵值，再验它们**没有**出现在输出里。
+  const cfgPath = join(DATA, 'qq-bridge.config.json')
+  const raw = JSON.parse(readFileSync(cfgPath, 'utf8'))
+  const SENTINEL_TOKEN = 'SENTINEL-TOKEN-AAAA'
+  const SENTINEL_WS = 'SENTINEL-WSTOKEN-BBBB'
+  const SENTINEL_BREEZE = 'SENTINEL-BREEZE-CCCC'
+  writeFileSync(cfgPath, JSON.stringify({
+    ...raw,
+    token: SENTINEL_TOKEN,
+    wsToken: SENTINEL_WS,
+    voiceBreezeKey: SENTINEL_BREEZE,
+    routes: {
+      private: { '1000000001': { sessionId: 'session-cfg-a', prefix: '[管理员]' } },
+      group: { '975663147': { sessionId: 'session-cfg-b', prefix: '' } }
+    },
+    groupUins: ['975663147'],
+    voiceTargetsPrivate: ['private:1000000001'],
+    voiceTargetsGroup: ['group:975663147']
+  }, null, 2), 'utf8')
+
+  // 重新加载配置（插件在 apply 时读过一次，这里直接改文件要让它重读）。
+  const { loadConfig } = await import('../lib/config.js')
+  loadConfig()
+
+  const res = makeRes()
+  await handler({ url: '/api/qq-bridge/config-export', method: 'GET' }, res)
+  const text = Buffer.isBuffer(res.body) ? res.body.toString('utf8') : String(res.body ?? '')
+  let data = null
+  try { data = JSON.parse(text) } catch { data = null }
+
+  ok(res.statusCode === 200, `HTTP 200（实际 ${res.statusCode}）`)
+  ok(data !== null, '返回的是合法 JSON')
+  ok(String(res.headers['content-type'] ?? '').includes('application/json'), '标成 JSON')
+  ok(String(res.headers['content-disposition'] ?? '').includes('attachment'), '带 attachment（点一下就是另存为）')
+  ok(String(res.headers['content-disposition'] ?? '').includes('qq-bridge-config.json'), '文件名是 qq-bridge-config.json')
+
+  // ---- ② 凭据一个字符都不能出去（这是本节的**主断言**）----
+  for (const [label, value] of [['token', SENTINEL_TOKEN], ['wsToken', SENTINEL_WS], ['voiceBreezeKey', SENTINEL_BREEZE]]) {
+    ok(!text.includes(value), `${label} 的明文没有出现在导出里`)
+  }
+  ok(data?.config?.token === '***已设置***', `token 打码成「已设置」（实际「${data?.config?.token}」）`)
+  ok(data?.config?.wsToken === '***已设置***', 'wsToken 打码成「已设置」')
+  ok(data?.config?.voiceBreezeKey === '***已设置***', 'voiceBreezeKey 打码成「已设置」')
+
+  // ---- ① 诊断需要的都在 ----
+  ok(JSON.stringify(data?.config?.routes?.private ?? {}).includes('session-cfg-a'),
+    '导出里带着私聊绑定（这是「发错人」最关键的证据）')
+  ok(JSON.stringify(data?.config?.routes?.group ?? {}).includes('975663147'), '导出里带着群绑定')
+  ok(JSON.stringify(data?.config?.groupUins ?? []).includes('975663147'), '导出里带着 groupUins（监听哪些群）')
+  ok(JSON.stringify(data?.config?.voiceTargetsPrivate ?? []).includes('private:1000000001'), '导出里带着语音私聊名单')
+  ok(JSON.stringify(data?.config?.voiceTargetsGroup ?? []).includes('group:975663147'), '导出里带着语音群名单')
+  ok(typeof data?.runtime?.version === 'string' && data.runtime.version !== '', '导出里带着版本号（判断装的是不是新版）')
+  ok(typeof data?.runtime?.bootAt === 'string' && data.runtime.bootAt !== '', '导出里带着启动时刻')
+  ok(typeof data?.exportedAt === 'string' && data.exportedAt !== '', '导出里带着导出时刻')
+
+  // ---- 派生事实要跟 config 对得上（界面上显示「已绑 N 个」时应该同数）----
+  ok(data?.summary?.privateRoutes === 1, `summary.privateRoutes = 1（实际 ${data?.summary?.privateRoutes}）`)
+  ok(data?.summary?.groupRoutes === 1, `summary.groupRoutes = 1（实际 ${data?.summary?.groupRoutes}）`)
+  ok(data?.summary?.groupUins === 1, `summary.groupUins = 1（实际 ${data?.summary?.groupUins}）`)
+  ok(data?.summary?.hasToken === true, 'summary.hasToken = true（打码之后仍能看出「配了」）')
+  ok(data?.summary?.hasBreezeKey === true, 'summary.hasBreezeKey = true')
+
+  // ---- 只认 GET ----
+  const postRes = makeRes()
+  await handler({ url: '/api/qq-bridge/config-export', method: 'POST' }, postRes)
+  ok(postRes.statusCode !== 200, `POST 拿不到配置（实际 ${postRes.statusCode}）`)
+
+  // 复原，别把哨兵值留给后面的用例（也免得污染隔离 HOME 之外的任何东西）
+  writeFileSync(cfgPath, JSON.stringify(raw, null, 2), 'utf8')
+  loadConfig()
 }
 
 console.log(`\n${passed} 过 / ${failed} 败`)
