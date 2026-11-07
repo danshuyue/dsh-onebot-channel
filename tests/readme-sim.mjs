@@ -51,8 +51,10 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
     splitMaxChars: 120,
     splitMinChars: 4,
     splitMaxParts: 8,
-    splitDelayMinMs: 200,
-    splitDelayMaxMs: 700,
+    splitDelayMode: 'fixed',
+    splitDelayMs: 800,
+    splitDelayPerCharMs: 120,
+    splitDelayMaxCapMs: 3000,
     requestTimeoutMs: 8000,
     wsFallbackPollMs: 30000
   }
@@ -74,7 +76,13 @@ console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEF
 
 console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
 {
-  const { registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool } = await import('../lib/tool.js')
+  const { registerSendTool, registerEmojiSearchTool, registerCollectTool, registerFacePreviewTool, registerFacePickTool, registerFaceRenameTool, registerWaitTool, registerPassTool, registerSkipTool, registerCloseTool, registerPokeTool, registerVoiceTool } = await import('../lib/tool.js')
+  const { normalizeToolFeatures, DEFAULTS } = await import('../lib/config.js')
+  // 0.17.4：工具数量**随配置变化**（工具箱分档），所以不能写死「12 个」。
+  // 这里按**代码默认值**算 —— README 描述的是「装好之后」的形态，那就是默认配置下的样子。
+  // ⚠️ 用 DEFAULTS 而不是 getConfig()：后者会被用户自己的配置文件覆盖
+  //   （用户调过 emoji:true 的话，这条断言就会莫名其妙报红）。
+  const features = normalizeToolFeatures(DEFAULTS.toolFeatures)
   const regs = []
   const ctx = {
     get: (name) => (name === 'tools'
@@ -82,13 +90,27 @@ console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
       : (name === 'attachments' ? { saveImages: async () => [] } : undefined)),
     effect: () => {}
   }
-  for (const fn of [registerSendTool, registerEmojiSearchTool, registerHistoryTool, registerQzoneTool, registerCollectTool, registerFacePreviewTool, registerWaitTool, registerPassTool, registerCloseTool, registerRememberTool]) {
-    await fn(ctx)
+  // 照 index.js 的分支跑：qq_send 永远注册，其余按档
+  await registerSendTool(ctx, undefined, { features })
+  if (features.silence) {
+    for (const fn of [registerWaitTool, registerPassTool, registerSkipTool, registerCloseTool]) await fn(ctx)
   }
-  eq(regs.map((t) => t.name).sort(), [
-    'qq_close', 'qq_collect_face', 'qq_emoji_search', 'qq_face_preview', 'qq_msg_history',
-    'qq_pass', 'qq_qzone_post', 'qq_remember', 'qq_send', 'qq_wait'
-  ], '注册的 10 个工具')
+  if (features.emoji) {
+    for (const fn of [registerEmojiSearchTool, registerCollectTool, registerFacePreviewTool, registerFacePickTool, registerFaceRenameTool]) await fn(ctx)
+  }
+  if (features.poke) await registerPokeTool(ctx)
+  if (features.voiceIn) await registerVoiceTool(ctx)
+
+  const expected = ['qq_send']
+  for (const [tier, names] of Object.entries({
+    silence: ['qq_wait', 'qq_pass', 'qq_skip', 'qq_close'],
+    emoji: ['qq_emoji_search', 'qq_collect_face', 'qq_face_preview', 'qq_face_pick', 'qq_face_rename'],
+    poke: ['qq_poke'],
+    voiceIn: ['qq_voice']
+  })) {
+    if (features[tier] === true) expected.push(...names)
+  }
+  eq(regs.map((t) => t.name).sort(), expected.slice().sort(), `按默认配置注册的 ${expected.length} 个工具`)
 
   for (const tool of regs) {
     ok(README.includes(`\`${tool.name}\``), `README 提到了 ${tool.name}`)
@@ -96,6 +118,14 @@ console.log('\n工具（README 的工具表必须跟 tool.js 一致）：')
       ok(README.includes(`\`${param}\``), `README 的工具表列出了 ${tool.name} 的参数 ${param}`)
     }
   }
+  // 默认关着的那几档也必须还在 README 的工具表里 —— 它们只是默认不注册，
+  // 用户随时能打开。README 漏掉它们，就等于「这个功能不存在」。
+  for (const name of ['qq_emoji_search', 'qq_collect_face', 'qq_face_preview', 'qq_face_pick',
+    'qq_face_rename', 'qq_poke', 'qq_voice']) {
+    ok(README.includes(`\`${name}\``), `README 仍然列出了 ${name}（默认关，但可开启）`)
+  }
+  // qq_send 的 voice 参数默认关着，但 README 必须写它 —— 否则用户不知道有这个能力
+  ok(README.includes('`voice`'), 'README 写明了 qq_send 的 voice 参数（默认关，可开启）')
 }
 
 console.log('\nHTTP 路由：')
@@ -151,7 +181,11 @@ console.log('\nREADME 里不该出现的过期信息：')
   ok(!/\b0\.2\.0\b/.test(README), '没有残留旧版本号 0.2.0')
   ok(!/14 个.*action/.test(README), '没有残留「14 个 action」（实际 13）')
   ok(README.includes('0.6.2'), '保留 0.6.2 那条私聊去重的排障说明')
-  ok(README.includes('10 个工具'), '写明了 10 个工具')
+  // 0.17.4：工具数量随「工具箱」分档变化，不能再钉死「12 个」。
+  // 改成钉「README 说清了默认注册几个 + 哪些默认关」这两件事本身。
+  ok(README.includes('默认注册') && README.includes('个工具'), 'README 说明了默认注册几个工具')
+  ok(README.includes('工具箱') && README.includes('重启 DSH'), 'README 说明了工具箱开关要重启 DSH 才生效')
+  ok(!/装好之后 agent 有 12 个工具/.test(README), '不再写死「装好之后一定 12 个工具」（分档后会变）')
 }
 
 console.log('\n链接与文档：')

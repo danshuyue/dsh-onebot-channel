@@ -181,7 +181,16 @@ try {
   const pollSrc = readFileSync(new URL('../lib/poll.js', import.meta.url), 'utf8')
   ok(pollSrc.includes('imageSegmentsOf'), 'poll.js 导入了 imageSegmentsOf（先判有没有图再下载）')
   ok(pollSrc.includes('contextImages'), 'poll.js 收集了 contextImages')
-  ok(/\[\.\.\.mainImages,\s*\.\.\.contextImages\]/.test(pollSrc), '投递时把主消息图和上下文图合并（主图在前）')
+  // 0.16.7 起数组里多了 ...forwardImages（卡片里的图），
+  // 但「主消息图在前、上下文图紧随其后」这个顺序约束没变 —— 断言只钉住这个前缀。
+  ok(/\[\.\.\.mainImages,\s*\.\.\.contextImages/.test(pollSrc), '投递时把主消息图和上下文图合并（主图在前）')
+  // 卡片图必须排在最后：它属于上下文，插到主消息图前面会让模型把图对错话
+  const orderMatch = pollSrc.match(/\[\.\.\.mainImages[^\]]*\]/)
+  ok(
+    orderMatch !== null
+      && orderMatch[0].indexOf('contextImages') < orderMatch[0].indexOf('forwardImages'),
+    '卡片图排在主消息图和上下文图之后（顺序不乱）'
+  )
   // 「只对确实带图的消息下载」这条要成立：必须有 imageSegmentsOf 的前置判断
   // 注意参数里本身含括号（Array.isArray(...)），所以不能用 [^)]* 去匹配
   ok(

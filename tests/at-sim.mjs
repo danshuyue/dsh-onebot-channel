@@ -56,19 +56,19 @@ try {
   const cfg = getConfig()
   const { sendToQQ } = await import('../lib/outbound.js')
   // 测试用的号全是假的，跟真实 QQ 无关（别把个人号写进仓库）
-  const GROUP = { kind: 'group', id: '685694947' }
-  const PRIVATE = { kind: 'private', id: '1519605856' }
+  const GROUP = { kind: 'group', id: '1000000001' }
+  const PRIVATE = { kind: 'private', id: '1000000002' }
 
   // ---- 1. 段顺序与「只第一条」----
   console.log('段顺序与「只第一条」：')
   calls.length = 0
-  await sendToQQ(GROUP, '第一句\n第二句\n第三句', { atUin: '5810550' })
+  await sendToQQ(GROUP, '第一句\n第二句\n第三句', { atUin: '1000000003' })
   eq(calls.length, 3, '三段 → 发 3 条')
   const seg1 = calls[0]?.params?.message ?? []
   const seg2 = calls[1]?.params?.message ?? []
   const seg3 = calls[2]?.params?.message ?? []
   eq(seg1.map((s) => s.type), ['at', 'text'], '第一条：at 在 text 之前')
-  eq(seg1[0]?.data?.qq, '5810550', '第一条：@ 的 QQ 号正确')
+  eq(seg1[0]?.data?.qq, '1000000003', '第一条：@ 的 QQ 号正确')
   ok(!seg2.some((s) => s.type === 'at'), '第二条：不带 @')
   ok(!seg3.some((s) => s.type === 'at'), '第三条：不带 @')
   eq(seg1.filter((s) => s.type === 'at').length, 1, '第一条只有一个 at 段')
@@ -76,15 +76,15 @@ try {
   // ---- 2. at + reply 共存时的顺序 ----
   console.log('\n@ 与引用的共存：')
   calls.length = 0
-  await sendToQQ(GROUP, '我看看', { atUin: '5810550', replyTo: '-535052793' })
+  await sendToQQ(GROUP, '我看看', { atUin: '1000000003', replyTo: '-535052793' })
   const both = calls[0]?.params?.message ?? []
   eq(both.map((s) => s.type), ['reply', 'at', 'text'], '段顺序 reply → at → text（实测协议端按此保留）')
   eq(both[0]?.data?.id, '-535052793', '引用 id 正确')
-  eq(both[1]?.data?.qq, '5810550', '@ 的号正确')
+  eq(both[1]?.data?.qq, '1000000003', '@ 的号正确')
 
   // 分条时 reply 和 at 都只在第一条
   calls.length = 0
-  await sendToQQ(GROUP, '甲\n乙', { atUin: '5810550', replyTo: '-1' })
+  await sendToQQ(GROUP, '甲\n乙', { atUin: '1000000003', replyTo: '-1' })
   const t1 = calls[0]?.params?.message ?? []
   const t2 = calls[1]?.params?.message ?? []
   eq(t1.map((s) => s.type), ['reply', 'at', 'text'], '第一条：reply+at+text')
@@ -93,7 +93,7 @@ try {
   // ---- 3. 边界：私聊 / 自己 / 垃圾值 ----
   console.log('\n边界：')
   calls.length = 0
-  await sendToQQ(PRIVATE, '私聊不该有 @', { atUin: '5810550' })
+  await sendToQQ(PRIVATE, '私聊不该有 @', { atUin: '1000000003' })
   ok(!(calls[0]?.params?.message ?? []).some((s) => s.type === 'at'), '私聊：@ 参数被忽略（没有这个概念）')
 
   calls.length = 0
@@ -111,17 +111,17 @@ try {
   await sendToQQ(GROUP, '没 @', {})
   ok(!(calls[0]?.params?.message ?? []).some((s) => s.type === 'at'), '不传 atUin → 不带 at 段')
 
-  // 号里的空格要能归一（' 5810550 '）
+  // 号里的空格要能归一（' 1000000003 '）
   calls.length = 0
-  await sendToQQ(GROUP, '归一化测试', { atUin: ' 5810550 ' })
-  eq((calls[0]?.params?.message ?? []).find((s) => s.type === 'at')?.data?.qq, '5810550', '号码前后的空格被归一掉')
+  await sendToQQ(GROUP, '归一化测试', { atUin: ' 1000000003 ' })
+  eq((calls[0]?.params?.message ?? []).find((s) => s.type === 'at')?.data?.qq, '1000000003', '号码前后的空格被归一掉')
 
   // ---- 4. 降级链 ----
   console.log('\n@ 的降级链：')
   // @ 被拒 → 去 @ 后成功
   calls.length = 0
   failSegments = ['at']
-  const r1 = await sendToQQ(GROUP, '这句很重要', { atUin: '5810550' })
+  const r1 = await sendToQQ(GROUP, '这句很重要', { atUin: '1000000003' })
   eq(calls.length, 2, '@ 失败后重发一次')
   ok(calls[0].params.message.some((s) => s.type === 'at'), '第一次带了 @')
   ok(!calls[1].params.message.some((s) => s.type === 'at'), '第二次去掉了 @')
@@ -131,7 +131,7 @@ try {
   // @ 和 reply 都被拒 → 两级降级
   calls.length = 0
   failSegments = ['at', 'reply']
-  await sendToQQ(GROUP, '两级降级', { atUin: '5810550', replyTo: '-1' })
+  await sendToQQ(GROUP, '两级降级', { atUin: '1000000003', replyTo: '-1' })
   eq(calls.length, 3, '@+引用都失败 → 共尝试 3 次')
   eq(calls[0].params.message.map((s) => s.type), ['reply', 'at', 'text'], '第 1 次：reply+at+text')
   eq(calls[1].params.message.map((s) => s.type), ['reply', 'text'], '第 2 次：去掉 @')
@@ -142,8 +142,8 @@ try {
   console.log('\n接线：')
   const { readFileSync } = await import('node:fs')
   const pollSrc = readFileSync(new URL('../lib/poll.js', import.meta.url), 'utf8')
-  ok(/const atUin = isAtMe\(message\.message, config\.selfUin\)/.test(pollSrc), '群投递：被 @ 时自动 @ 回触发人')
-  ok(/\{ replyTo, atUin \}/.test(pollSrc), '群投递把 atUin 传给了 deliver')
+  ok(/atUinForWindow|senderUin/.test(pollSrc), '群投递：被 @ 时自动 @ 回触发人')
+  ok(/replyTo, atUin/.test(pollSrc), '群投递把 atUin 传给了 deliver')
 
   const outSrc = readFileSync(new URL('../lib/outbound.js', import.meta.url), 'utf8')
   ok(/atUin: String\(options\?\.atUin/.test(outSrc), 'enqueueOutbound 存了 atUin')

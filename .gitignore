@@ -27,3 +27,12 @@ Thumbs.db
 # 大改之前的本地备份（形如 lib.bak-20261028-142548/）
 *.bak-*/
 *.bak-*
+
+# 本机沙箱的一次性产物（2026-11-07）
+# 这里放的是隔离测试的临时 HOME、变异验证的临时副本，以及几个
+# 「排障时写的、删不掉的」小脚本（沙箱 unlink 一律 EPERM，见 docs/维护索引.md §9）。
+# 它们对仓库没有任何价值，`git clean -fdx` 可以一次清掉。
+.tmp-test/
+check-*.mjs
+tts-mutation-report.txt
+

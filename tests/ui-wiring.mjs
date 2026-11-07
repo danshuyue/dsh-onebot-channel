@@ -54,10 +54,38 @@ const deliverSrc = read('lib/deliver.js')
 const routeRead = routeKeys.filter((k) => new RegExp(`route\\.${k}\\b`).test(deliverSrc))
 ok(routeRead.length === routeKeys.length, `路由表每个写入字段都有消费方（${routeRead.join('/')}）`)
 
+// ---- 3b. prefix 的**作用域**必须跟消费方一致（2026-11-06）--------------------
+// prefixOf 全仓库只有 poll.js 的私聊路径调用一次；群头是 poll.js 按发送者身份硬拼的。
+// 也就是说 route.prefix 对群聊从来没有消费方。以前的界面却给群表也渲染了输入框，
+// 用户填了以为生效 —— 这正是「群聊前缀到底是干什么的」这个问题的来源。
+// 光删控件不够：后端要是照存，配置里就留着一个永远不生效的值。两头都得钉住。
+// （前端那半边在下面 clientSrc 定义之后再查，见 3c。）
+ok(/export function prefixOf[\s\S]{0,400}?\n}/.test(deliverSrc), 'deliver.js 里仍导出 prefixOf')
+const prefixCallers = libFiles
+  .filter((f) => f !== 'deliver.js')
+  .filter((f) => /prefixOf\(/.test(srcOf(f)))
+ok(prefixCallers.join(',') === 'poll.js', `prefixOf 只被 poll.js 调用（实际：${prefixCallers.join(',') || '无'}）`)
+// 后端：群表不许再收 prefix，私聊表收
+ok(/normalizeRouteTable\(body\.routes\.group,\s*false\)/.test(apiSrc), '群聊路由表不再保存 prefix（它没有消费方）')
+ok(/normalizeRouteTable\(body\.routes\.private,\s*true\)/.test(apiSrc), '私聊路由表仍保留 prefix')
+
 // ---- 4. API 暴露的字段必须在 DEFAULTS 里存在（防拼错/防遗漏改名）-----------
 const publicBlock = apiSrc.slice(apiSrc.indexOf('export function publicConfig'), apiSrc.indexOf('const NUMERIC_FIELDS'))
 const publicKeys = [...publicBlock.matchAll(/^ {4}([A-Za-z][A-Za-z0-9]*):/gm)].map((m) => m[1])
-const orphanPublic = publicKeys.filter((k) => !defaultKeys.includes(k))
+/**
+ * 只读派生字段：publicConfig 里算出来的、**故意不是配置键**的那些。
+ *
+ * 为什么需要这个名单：下面那条断言原本把「暴露了但不在 DEFAULTS 里」一律当错误 ——
+ * 那对拼错的键名是对的，但派生字段会被误判。加派生字段时必须在这里说明理由，
+ * 否则就会看到一条红，而那条红的正确解法是「登记」而不是「删掉字段」。
+ */
+const DERIVED_PUBLIC = {
+  // 凭据只回「配没配」，key 本身绝不回传。前端拿它决定输入框的 placeholder。
+  voiceBreezeKeySet: '派生自 voiceBreezeKey，只表示「配了没」，不回传 key 本身'
+}
+const orphanPublic = publicKeys
+  .filter((k) => !(k in DERIVED_PUBLIC))
+  .filter((k) => !defaultKeys.includes(k))
 ok(orphanPublic.length === 0, `API 暴露字段都在 DEFAULTS 里${orphanPublic.length ? '，多余：' + orphanPublic.join(', ') : ''}`)
 
 // ---- 5. 可写字段的分类表必须都指向真配置 ------------------------------------
@@ -80,8 +108,50 @@ const bogus = writable.filter((k) => !defaultKeys.includes(k))
 ok(writable.length >= 20, `可写字段 ${writable.length} 个`)
 ok(bogus.length === 0, `可写字段都是真配置${bogus.length ? '，假的：' + bogus.join(', ') : ''}`)
 
+// ---- 4b. 反向：可写字段必须真的被 publicConfig 暴露 -------------------------
+//
+// ⚠️ 这条是 0.19.0 装进 profile 之后才补的，起因是一次真实事故：
+//    语音那 12 个配置项（voiceMode / voiceEngine / voiceTargets* / voiceDailyChars /
+//    voiceBreeze* …）进了 DEFAULTS、也进了设置页，**但忘了进 publicConfig**。
+//    后果是「界面能改、改了没用」：前端拿不到初值，后端保存也不落盘。
+//    上面那条 4 号断言查的是「暴露的 → 在 DEFAULTS 里」，方向正好相反，抓不到它；
+//    而 ui-wiring 当时全绿（105 过 0 败），于是这个洞一路漏到了实机才知道。
+//
+// 排除项：有正当理由不暴露的键。
+const INTENTIONALLY_UNEXPOSED = {
+  // 凭据绝不回传 —— 前端只读 voiceBreezeKeySet 这个布尔。见 api.js 的注释。
+  voiceBreezeKey: '凭据，绝不回显（前端读 voiceBreezeKeySet 布尔）'
+}
+{
+  const notPublic = writable
+    .filter((k) => !(k in INTENTIONALLY_UNEXPOSED))
+    .filter((k) => !publicKeys.includes(k))
+  ok(notPublic.length === 0,
+    `⚠️ 可写字段都在 publicConfig 里（否则界面能改、改了不生效）${notPublic.length ? '，缺：' + notPublic.join(', ') : ''}`)
+}
+
 // ---- 6. 每个可写字段都要在设置页里真的有控件 --------------------------------
 const clientSrc = read('lib/client.js')
+
+// ---- 3c. prefix 作用域：前端那半边（接 3b，需要 clientSrc）------------------
+const tableSrc = clientSrc.slice(clientSrc.indexOf('function renderTable'), clientSrc.indexOf('function onField'))
+ok(tableSrc !== '', '能定位到 renderTable 的函数体')
+ok(tableSrc.includes("kind === 'private'"), '绑定表按私聊/群聊分流渲染前缀格')
+ok(tableSrc.includes('群头自动生成'), '群聊那一格改成了说明文字，不是输入框')
+ok(tableSrc.includes('群聊不需要前缀'), '绑定页写明了「群聊不需要前缀」')
+ok(tableSrc.includes('留空 = 用「高级」里的私聊默认前缀'), '私聊前缀说明了自己与全局默认的关系')
+// 群聊那一格不能还是 input：以前就是「群表也渲染输入框」造成的假配置。
+// 盯的是「群聊分支渲染的是 span」，不是「文件里没有 input」——
+// 私聊分支当然还有 input，全文件搜必然误判。
+// ⚠️ 窗口要够宽：span 的属性（className/key/title）加起来 300+ 字符，
+//    写 {0,200} 会假红（第一次就踩到了）。
+const groupBranch = tableSrc.slice(tableSrc.indexOf(": h('span'"), tableSrc.indexOf("}, '群头自动生成')"))
+ok(groupBranch !== '', '能定位到群聊那一格的 span 分支')
+ok(!groupBranch.includes('qqb-input'), '群聊分支里没有输入框（改成了纯文字说明）')
+ok(!groupBranch.includes('setPrefixOf'), '群聊分支不再写 route.prefix')
+// 「高级」那张卡：三样叫「前缀」的东西要区分开
+ok(clientSrc.includes('这一页有两个「前缀」'), '高级页解释了私聊默认前缀与绑定表前缀的区别')
+ok(clientSrc.includes('第三样东西'), '高级页指出「命令前缀」是另一回事，别混')
 const tunablesBlock = clientSrc.slice(clientSrc.indexOf('setTunables({'), clientSrc.indexOf('})', clientSrc.indexOf('setTunables({')))
 const notLoaded = writable.filter((k) => !new RegExp(`\\b${k}:`).test(tunablesBlock))
 ok(notLoaded.length === 0, `可写字段都进了设置页的表单状态${notLoaded.length ? '，缺：' + notLoaded.join(', ') : ''}`)
@@ -111,7 +181,11 @@ const DELIBERATE = {
   allowSendToAny: '安全逃生阀，故意只留配置文件',
   wsToken: '凭据，留空即保持原样',
   enabled: '总开关只在加载时读一次，给按钮会误导成即时生效',
-  workspaceCwd: '由会话列表决定，界面只显示',
+  backfillOnStart: '上线补历史，开关在接口暂留',
+  qzoneRequireConfirm: '说说发布工具当前未注册，不向设置页暴露无效开关',
+  // 0.17.4：toolFeatures 是**对象**，五个子键在设置页是一组复选框（走 onFeature，
+  // 不是 onField），所以「顶层键字面量」这套检查抓不到子键 —— 它有自己的断言（8e 节）。
+  toolFeatures: '对象型字段，五个子键由「工具箱」区块的复选框组接管（见 8e 节）',
 }
 const uncovered = defaultKeys
   .filter((k) => !writable.includes(k))
@@ -126,6 +200,7 @@ ok(staleWhite.length === 0, `白名单里没有已删除的键${staleWhite.lengt
 for (const [key, label] of [
   ['replyQuietMs', '回复前静默'],
   ['waitMaxMs', '等待上限'],
+  ['waitTurnMaxMs', '单回合等待总量'],
   ['closureEnabled', '判断收尾'],
   ['memoryEnabled', '关系记忆开关'],
   ['backfillOnStart', '上线补历史'],
@@ -133,6 +208,7 @@ for (const [key, label] of [
   ['mergeMaxWaitMs', '合并上限'],
   ['proactiveEnabled', '主动搭话开关'],
   ['proactiveIdleHours', '主动搭话的空闲门槛'],
+  ['proactiveIdleMaxHours', '主动搭话的空闲上限（摇号区间）'],
   ['proactiveQuietFrom', '静默时段'],
 ]) {
   ok(new RegExp(`['"]${key}['"]`).test(clientSrc), `设置页有「${label}」（${key}）`)
@@ -182,9 +258,104 @@ ok(read('lib/outbound.js').includes("config.splitMode === 'sentence'"), '转发�
 ok(read('docs/QQ对话说明.md').includes('换行 = 另起一条'), '对话说明里告诉了模型「换行就是分条」')
 ok(clientSrc.includes('qqb-warn'), '插件被停用时页面会显式告警')
 
+// ---- 8e. 工具箱分档（0.17.4）：对象字段的子键都要有落点 ---------------
+// 前几节按 DEFAULTS 的**顶层键**扫描，toolFeatures 只是一个键，抓不到它的子键；
+// 所以这里单独把子键对一遍 —— 漏一个，用户就永远打不开那一档。
+//
+// ⚠️ 0.19.0 变更：voiceOut 从「工具箱的复选框」挪去了「对话节奏 → 语音模式」四档。
+//    它不是被删了（qq_send 的 voice 参数在不在 schema 里仍然看它），
+//    而是**真相源换成了 voiceMode**，由 config.js 的 deriveToolFeatures 单向推导。
+//    所以这个键的看守方式必须跟着变：查「有没有复选框」会永远红，
+//    要查的是「它确实由 voiceMode 推导出来」——那才是现在真正要保证的事。
+{
+  const FEATURE_KEYS = ['silence', 'emoji', 'voiceIn', 'poke']
+  const cfgSrc = read('lib/config.js')
+  const defaultsBlock2 = cfgSrc.slice(cfgSrc.indexOf('export const TOOL_FEATURE_DEFAULTS'), cfgSrc.indexOf('export function normalizeToolFeatures'))
+  for (const key of FEATURE_KEYS) {
+    ok(new RegExp(`^ {2}${key}:`, 'm').test(defaultsBlock2), `TOOL_FEATURE_DEFAULTS 里有 ${key}`)
+  }
+  // voiceOut 仍然在默认值里（tool.js 的 featuresOf 按它工作），但不该有复选框
+  ok(/^ {2}voiceOut:/m.test(defaultsBlock2), 'TOOL_FEATURE_DEFAULTS 里仍有 voiceOut（由 voiceMode 推导）')
+  ok(!/row\('voiceOut',/.test(clientSrc), '「工具箱」里**没有** voiceOut 复选框（挪去四档了）')
+  // 推导函数存在，且是单向的：从 voiceMode 算出 voiceOut
+  ok(cfgSrc.includes('export function deriveToolFeatures'), 'config.js 导出 deriveToolFeatures')
+  const deriveBlock = cfgSrc.slice(cfgSrc.indexOf('export function deriveToolFeatures'), cfgSrc.indexOf('export function normalizeToolFeatures'))
+  ok(/base\.voiceOut\s*=\s*String\(config\?\.voiceMode/.test(deriveBlock),
+    'deriveToolFeatures 从 voiceMode 推 voiceOut（单向，不反向写回）')
+  ok(!/config\.voiceMode\s*=/.test(deriveBlock), 'deriveToolFeatures 不反向改写 voiceMode')
+  // 子键必须真的接到「工具箱」区块的复选框上（row(...) 的四个参数是 key/标签/说明）
+  for (const key of FEATURE_KEYS) {
+    ok(new RegExp(`row\\('${key}',`).test(clientSrc), `设置页「工具箱」有 ${key} 的复选框`)
+  }
+  // 四档必须有控件，且是 radio（select 的 option 塞不下那四句定义）
+  ok(/qqb-voice-mode/.test(clientSrc), '设置页有语音四档的 radio 组')
+  ok(clientSrc.includes('function renderVoiceModeCard'), '四档有独立的卡片渲染函数')
+  for (const mode of ['off', 'passive', 'free', 'active']) {
+    ok(new RegExp(`\\['${mode}',`).test(clientSrc), `四档里有 ${mode}`)
+  }
+  // 嵌套字段必须走自己的 setter —— onField 会把整个对象替换成布尔值
+  ok(clientSrc.includes('function onFeature'), '嵌套字段有专用的 onFeature setter')
+  ok(!/onChange: onField\('toolFeatures'\)/.test(clientSrc), 'toolFeatures 没有被 onField 直接接管')
+  // 后端：对象字段必须单独成类，并在保存时归一化
+  ok(apiSrc.includes('OBJECT_FIELDS'), '后端有 OBJECT_FIELDS 这一类')
+  ok(/OBJECT_FIELDS\s*=\s*\['toolFeatures'\]/.test(apiSrc), 'OBJECT_FIELDS 里就是 toolFeatures')
+  ok(apiSrc.includes('normalizeToolFeatures(body[key])'), '保存时走 normalizeToolFeatures 归一化')
+  // 字符数必须实测（不手写）：后端有测量函数、前端消费它
+  ok(apiSrc.includes('export async function toolSchemaSizes'), '后端有实测 schema 字符数的函数')
+  ok(apiSrc.includes('toolSizes: await toolSchemaSizes()'), '/state 里带实测字符数')
+  ok(!/约 2\.4 万|24000|15000 字符/.test(clientSrc), '设置页没有手写的字符数常量')
+  // 「改完要重启」必须写在设置页上（工具在 apply 里注册，热改无效）
+  ok(clientSrc.includes('改完这一块要'), '工具箱卡片写明了改完要重启才生效')
+}
+
 // ---- 9. 过时文案不再出现 ----------------------------------------------------
 ok(!clientSrc.includes('可以在这里给某个号新建会话'), '顶部注释不再声称有「新建会话」')
 ok(!clientSrc.includes('新配置下一轮轮询生效'), '保存提示不再说「下一轮轮询生效」')
+
+// ---- 10. 余额：配了 key 就自动查，别让人自己想起来点按钮（2026-11-07）-------
+//
+// 用户反馈「余额查不到」。查下来接口和后端都正常，真正的问题是**观感**：
+// 卡片上写着「（点一下查）」，而这张卡只在引擎选中 Breeze 时才渲染
+// —— 用户切过去还得自己想起来点那个「刷新」。
+// 所以：加载时若 key 已配就自动查一次，占位文案也跟着改成「查询中…」。
+{
+  ok(clientSrc.includes('if (hasKey) {'), '配了 key 的加载路径里有自动查余额的分支')
+  ok(clientSrc.includes("apiPost('/voice-balance', {})"), '自动查余额走的是 /voice-balance')
+  // ⚠️ 只查「作为字符串字面量出现」的旧文案，不查注释 ——
+  //    注释里会引述旧行为来说明为什么改（那是文档，不是残留）。
+  ok(!clientSrc.includes("'（点一下查）'"), '占位文案不再写「（点一下查）」（已经自动查了）')
+  // 自动查要静默失败：用户没主动问，弹红字反而像出故障了
+  const autoBlock = clientSrc.slice(clientSrc.indexOf('if (hasKey) {'), clientSrc.indexOf('if (hasKey) {') + 1200)
+  ok(autoBlock.includes('静默'), '自动查余额失败时保持静默（用户没主动问）')
+}
+
+// ---- 11. 语音模式：必须显示「正在生效 vs 已选择」（2026-11-07）--------------
+//
+// 用户反馈：「语音模式需要重启 dsh 才生效，这会让用户反直觉」。
+// 只写一句「要重启」不够 —— 用户改完保存、切出去再回来，看到的是自己刚选的
+// 新值，会以为已经生效，然后发现行为没变，于是当成 bug 报上来。
+// 所以卡片必须并排显示两个值，不一致时给警告。
+{
+  ok(clientSrc.includes('activeVoiceMode'), '前端读 runtime.activeVoiceMode（启动时生效的模式）')
+  ok(clientSrc.includes('function voiceModeStatus'), '有「正在生效 vs 已选择」的渲染函数')
+  ok(clientSrc.includes('重启 DSH 后才会换成'), '不一致时明说「重启后才换」')
+  ok(clientSrc.includes('当前模式：'), '一致时也显示「当前模式：X（已生效）」')
+  // 后端必须真的捕获启动值，否则前端拿到空串、对比退化成不显示
+  const apiSrc2 = readFileSync('lib/api.js')
+  ok(apiSrc2.includes('captureBootVoiceMode'), 'api.js 有 captureBootVoiceMode')
+  const indexSrc = readFileSync('lib/index.js')
+  ok(indexSrc.includes('captureBootVoiceMode(config)'), 'index.js 在 apply 里调了它（否则永远是空串）')
+}
+
+// ---- 12. 测试语句可自定义（2026-11-07）--------------------------------------
+{
+  ok(clientSrc.includes('voiceTestText'), '设置页有「测试语句」控件')
+  // 后端两处（工具自测 / 设置页按钮）必须同源，否则「按钮测的」和「工具测的」不是同一句
+  const toolSrc = readFileSync('lib/tool.js')
+  ok(toolSrc.includes('export function resolveVoiceTestText'), 'tool.js 导出 resolveVoiceTestText')
+  ok(readFileSync('lib/api.js').includes('resolveVoiceTestText(config)'), 'api.js 的按钮也用它')
+  ok(toolSrc.includes('resolveVoiceTestText(config)'), 'tool.js 的自测也用它')
+}
 
 process.stdout.write(`\n${pass} 过 ${fail} 败\n`)
 process.exit(fail === 0 ? 0 : 1)

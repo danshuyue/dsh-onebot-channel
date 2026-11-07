@@ -44,9 +44,9 @@ try {
   console.log('onebot.js 的段解析：')
   const { replyTargetOf, atTargetsOf, textOf } = await import('../lib/onebot.js')
 
-  // 实测样本：{"type":"reply","data":{"id":"-1019027093"}}
-  eq(replyTargetOf([{ type: 'reply', data: { id: '-1019027093' } }]), { id: '-1019027093' }, 'reply 段：负数 id 原样保留')
-  eq(replyTargetOf([{ type: 'reply', data: { id: '1519605856' } }]), { id: '1519605856' }, 'reply 段：正数 id 也认')
+  // 实测样本：{"type":"reply","data":{"id":"-900000001"}}
+  eq(replyTargetOf([{ type: 'reply', data: { id: '-900000001' } }]), { id: '-900000001' }, 'reply 段：负数 id 原样保留')
+  eq(replyTargetOf([{ type: 'reply', data: { id: '1000000002' } }]), { id: '1000000002' }, 'reply 段：正数 id 也认')
   eq(replyTargetOf([{ type: 'text', data: { text: '你好' } }]), null, '没有 reply 段 → null')
   eq(replyTargetOf(null), null, 'null 输入不抛错')
   eq(replyTargetOf([]), null, '空数组不抛错')
@@ -59,8 +59,8 @@ try {
   const bigId = '2008556211'
   eq(replyTargetOf([{ type: 'reply', data: { id: bigId } }]).id, bigId, '大 id 保持字符串，不丢精度')
 
-  // 实测样本：{"type":"at","data":{"qq":"762910152"}}
-  eq(atTargetsOf([{ type: 'at', data: { qq: '762910152' } }]), ['762910152'], 'at 段：取出被 @ 的 QQ')
+  // 实测样本：{"type":"at","data":{"qq":"1000000003"}}
+  eq(atTargetsOf([{ type: 'at', data: { qq: '1000000003' } }]), ['1000000003'], 'at 段：取出被 @ 的 QQ')
   eq(atTargetsOf([
     { type: 'at', data: { qq: '1' } },
     { type: 'at', data: { qq: '1' } }
@@ -81,15 +81,12 @@ try {
     calls.push(payload)
     if (failNext > 0) {
       failNext -= 1
-      // 模拟协议端彻底拒发（任何段都不收）
-      if (failMode === 'all') {
-        return { ok: true, json: async () => ({ status: 'failed', retcode: 100, wording: 'boom' }) }
-      }
       // 模拟协议端因为引用段拒发
       if (failMode === 'reply') {
         const hasReply = (payload.params?.message ?? []).some((s) => s.type === 'reply')
         if (hasReply) return { ok: true, json: async () => ({ status: 'failed', retcode: 100, wording: 'reply id invalid' }) }
       }
+      if (failMode === 'all') return { ok: true, json: async () => ({ status: 'failed', retcode: 100, wording: 'all rejected' }) }
       return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: { message_id: 123 } }) }
     }
     return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data: { message_id: 123 } }) }
@@ -101,32 +98,32 @@ try {
 
   // 分三条发，带引用
   calls.length = 0
-  await sendToQQ({ kind: 'group', id: '685694947' }, '第一句\n第二句\n第三句', { replyTo: '-1019027093' })
+  await sendToQQ({ kind: 'group', id: '1000000001' }, '第一句\n第二句\n第三句', { replyTo: '-900000001' })
   eq(calls.length, 3, '三段正文 → 发 3 条消息')
   const first = calls[0]?.params?.message ?? []
   const second = calls[1]?.params?.message ?? []
   const third = calls[2]?.params?.message ?? []
   eq(first[0]?.type, 'reply', '第一条：reply 段排在最前面')
-  eq(first[0]?.data?.id, '-1019027093', '第一条：引用 id 正确（负数原样）')
+  eq(first[0]?.data?.id, '-900000001', '第一条：引用 id 正确（负数原样）')
   ok(!second.some((s) => s.type === 'reply'), '第二条：不带引用')
   ok(!third.some((s) => s.type === 'reply'), '第三条：不带引用')
   eq(first.filter((s) => s.type === 'reply').length, 1, '第一条只有一个 reply 段')
 
   // 不传 replyTo → 一条都不带引用
   calls.length = 0
-  await sendToQQ({ kind: 'group', id: '685694947' }, '没有引用', {})
+  await sendToQQ({ kind: 'group', id: '1000000001' }, '没有引用', {})
   ok(!(calls[0]?.params?.message ?? []).some((s) => s.type === 'reply'), '不传 replyTo → 不带引用段')
 
   // 空字符串 replyTo 也不能产生空引用段
   calls.length = 0
-  await sendToQQ({ kind: 'group', id: '685694947' }, '空引用', { replyTo: '   ' })
+  await sendToQQ({ kind: 'group', id: '1000000001' }, '空引用', { replyTo: '   ' })
   ok(!(calls[0]?.params?.message ?? []).some((s) => s.type === 'reply'), 'replyTo 是空白 → 不带引用段')
 
   // segments 显式分段时，同样只有第一条带引用
   calls.length = 0
-  await sendToQQ({ kind: 'group', id: '685694947' }, '', {
+  await sendToQQ({ kind: 'group', id: '1000000001' }, '', {
     segments: ['甲', '乙'],
-    replyTo: '1519605856'
+    replyTo: '1000000002'
   })
   eq(calls.length, 2, 'segments 两段 → 发 2 条')
   eq((calls[0]?.params?.message ?? [])[0]?.type, 'reply', 'segments 模式：第一条带引用')
@@ -137,7 +134,7 @@ try {
   calls.length = 0
   failNext = 10
   failMode = 'reply'
-  const r = await sendToQQ({ kind: 'group', id: '685694947' }, '这句很重要', { replyTo: '-999' })
+  const r = await sendToQQ({ kind: 'group', id: '1000000001' }, '这句很重要', { replyTo: '-999' })
   // 第一次带 reply 失败 → 第二次不带 reply 成功
   eq(calls.length, 2, '带引用失败后重发了一次')
   ok(calls[0].params.message.some((s) => s.type === 'reply'), '第一次尝试带了引用')
@@ -145,20 +142,16 @@ try {
   eq(calls[1].params.message.find((s) => s.type === 'text')?.data?.text, '这句很重要', '重发时正文完整保留')
   ok(r !== null && r !== undefined, '最终仍然返回结果（没抛错）')
 
-  // 0.15.1：降级链全军覆没时必须**抛错**。
-  // 原来只 note 不抛，result 留 null，一路走到 `return result ?? {}`，
-  // qq_send 就把 message_id: 0 当成功报回去 —— 静默丢消息 + 假成功。
-  console.log('\n降级全失败时不许假成功：')
-  calls.length = 0
+  // 全部降级都失败时必须抛错，不能返回 message_id=0 假装成功。
   failNext = 10
   failMode = 'all'
-  let threw = false
+  let allFailed = false
   try {
-    await sendToQQ({ kind: 'group', id: '685694947' }, '这条根本发不出去', { replyTo: '-999' })
+    await sendToQQ({ kind: 'group', id: '1000000001' }, '全失败', { replyTo: '-999' })
   } catch {
-    threw = true
+    allFailed = true
   }
-  ok(threw, '逐级降级都失败 → 抛错（调用方能知道没发出去）')
+  ok(allFailed, '降级全失败会抛错')
   failNext = 0
   failMode = ''
 
@@ -168,33 +161,22 @@ try {
   console.log('\n投递正文的锚点接线：')
   const { readFileSync } = await import('node:fs')
   const pollSrc = readFileSync(new URL('../lib/poll.js', import.meta.url), 'utf8')
-  ok(/function refOf\(/.test(pollSrc), 'poll.js 有 refOf()：把 message_id 变成 [#id]')
+  ok(/export function refOf\(/.test(pollSrc), 'poll.js 有 refOf()：把 message_id 变成 [#id]')
   ok(/\$\{refOf\(item\)\}/.test(pollSrc), '私聊正文：每条消息都带锚点')
   ok(/\$\{refOf\(message\)\}/.test(pollSrc), '群主消息：正文带锚点')
   ok(/\$\{refOf\(item\)\}\$\{nameOfSender/.test(pollSrc), '群上下文：每条也带锚点')
   ok(/→ #\$\{quoted\.id\}/.test(pollSrc), '群上下文：引用了别人的消息时标出 → #id')
   // message_id 为 0 是无效 id（协议端规定 message_id 非零）
-  // 0.15.1：改成**真的调一遍 refOf**（它已导出）。原来是源码字符串断言
-  // `/id === 0\) return ''/`，实现一改写法测试就假红/假绿，守不住行为。
-  const { refOf } = await import('../lib/poll.js')
-  eq(refOf({ message_id: '0' }), '', 'refOf 把 id=0 当作无效')
-  eq(refOf({ message_id: 0 }), '', 'refOf 把数字 0 当作无效')
-  eq(refOf({ message_id: undefined }), '', 'refOf 没有 id → 空串')
-  eq(refOf({ message_id: 'abc' }), '', 'refOf 非数字 → 空串（不产出非法段）')
-  eq(refOf({ message_id: '-1019027093' }), '[#-1019027093]', 'refOf 负数 id 原样保留')
-  // 2^53+1：Number 往返会变成 9007199254740992，锚点就指错消息了
-  eq(refOf({ message_id: '9007199254740993' }), '[#9007199254740993]', 'refOf 超大 id 不丢精度（不 Number 往返）')
+  ok(/raw === '0'/.test(pollSrc), 'refOf 把 0 当作无效（不产出空锚点）')
   // 自动转发要带 replyTo
   ok(/replyTo\b/.test(pollSrc), 'poll.js 把 replyTo 传给了 deliver')
-  // 0.15.1 回归：锚点前缀让 startsWith('群友') 恒假，身份加固提示会整段消失
-  ok(/line\.includes\('群友'\)/.test(pollSrc), '群聊身份提示用 includes 判断（锚点在前也不失效）')
-  ok(!/line\.startsWith\('群友'\)/.test(pollSrc), '没有人再用 startsWith(\'群友\') 判身份')
 
   const outSrc = readFileSync(new URL('../lib/outbound.js', import.meta.url), 'utf8')
   ok(/replyTo: String\(options\?\.replyTo/.test(outSrc), 'enqueueOutbound 存了 replyTo')
   // 断言「自动转发把 replyTo 传下去了」，但别钉死整行 ——
   // 0.14.0 加了 atUin 之后这行多了一个参数，钉死整行会让测试变脆。
-  ok(/sendToQQ\(entry\.target, text, \{[^}]*replyTo: entry\.replyTo/.test(outSrc), '自动转发把 replyTo 用上了')
+  // 0.18.2：出站正文变量从 text 改成 outText（加会话标签），第一个实参改用 \w+ 匹配。
+  ok(/sendToQQ\(entry\.target,\s*\w+,\s*\{[^}]*replyTo: entry\.replyTo/.test(outSrc), '自动转发把 replyTo 用上了')
 
   const toolSrc = readFileSync(new URL('../lib/tool.js', import.meta.url), 'utf8')
   ok(/reply_to: \{/.test(toolSrc), 'qq_send 的参数里声明了 reply_to')

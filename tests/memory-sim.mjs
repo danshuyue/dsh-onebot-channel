@@ -108,6 +108,53 @@ writeFileSync(TMP, '{这不是 JSON', 'utf8')
 useMemoryFile(TMP)
 eq(describeMemory('private:1'), '', '文件读坏时不崩、按空处理')
 
+// 11. 原始 JSON 编辑（0.18.6）：读 / 校验 / 保存
+{
+  const { readMemoryRaw, saveMemoryRaw } = await import('../lib/memory.js')
+
+  // 文件是坏 JSON 时也要能读出来 —— 编辑器的用途之一就是修它
+  const broken = readMemoryRaw()
+  ok(broken.ok === true, '文件坏了也能读到原文（好让人去修）')
+  ok(String(broken.text).includes('这不是 JSON'), '读到的是原始内容')
+
+  // 保存坏 JSON → 拒绝，且**原文件不动**
+  const before = readMemoryRaw().text
+  const bad = saveMemoryRaw('{还是坏的')
+  ok(bad.ok === false, '坏 JSON 被拒绝')
+  ok(String(bad.error).includes('JSON'), `错因说清是 JSON 问题（实际「${bad.error}」）`)
+  eq(readMemoryRaw().text, before, '被拒时原文件一个字节都没变')
+
+  // 空串 → 拒绝（要清空请用「清空记忆」，别存空文件）
+  ok(saveMemoryRaw('').ok === false, '空内容被拒绝')
+  ok(saveMemoryRaw('   ').ok === false, '只有空白也被拒绝')
+
+  // 数组 / 标量 → 拒绝（最外层必须是对象）
+  // ⚠️ 每一条都要单独验证「原文件没变」—— 不能只在坏 JSON 那条测一次。
+  //    第一版我把 before/after 只放在坏 JSON 那里，结果「数组被拒时也偷偷写了盘」
+  //    这种变异抓不到（前面那条已经改过文件，后面的比对基准已经脏了）。
+  const beforeArray = readMemoryRaw().text
+  ok(saveMemoryRaw('[]').ok === false, '数组被拒绝（最外层必须是对象）')
+  eq(readMemoryRaw().text, beforeArray, '数组被拒时原文件一个字节都没变')
+
+  const beforeScalar = readMemoryRaw().text
+  ok(saveMemoryRaw('123').ok === false, '标量被拒绝')
+  eq(readMemoryRaw().text, beforeScalar, '标量被拒时原文件一个字节都没变')
+
+  // 合法对象 → 保存成功，且**立刻生效**（内存态要作废重载）
+  const good = saveMemoryRaw(JSON.stringify({
+    'private:777': { nick: '手写的名字', facts: [{ text: '手动加的事实', at: 1 }], count: 3, lastSeen: 2 }
+  }))
+  ok(good.ok === true, '合法 JSON 保存成功')
+  eq(good.count, 1, '返回写入的卡数')
+  eq(loadMemory('private:777').nick, '手写的名字', '保存后立刻能读到（内存态已作废重载）')
+  ok(describeMemory('private:777').includes('手动加的事实'), '手写的事实进了注入正文')
+
+  // 写盘格式：2 空格缩进 + 结尾换行（人可读，和插件自己写的保持一致）
+  const saved = readMemoryRaw().text
+  ok(saved.endsWith('\n'), '文件以换行结尾')
+  ok(saved.includes('\n  '), '用 2 空格缩进')
+}
+
 console.log(`\n${passed} 过 / ${failed} 败`)
 rmSync(TMP, { force: true })
 process.exit(failed === 0 ? 0 : 1)

@@ -184,5 +184,58 @@ console.log('rhythm · 「只有动作」的判定（主动搭话回合用）：
   eq(isStageOnly('   '), true, '纯空白 → 没什么可发')
 }
 
+// ---------------------------------------------------------------------------
+// 「吧」结尾的让步句（0.16.15）
+//
+// 用户实测：对方想结束话题时她收不了尾，还把「该不该结束」的判断念出来。
+// 根因之一在判定层 —— QUESTION_RE 里的 `吧$` 把所有以「吧」结尾的句子判成疑问，
+// 于是 openQuestion 恒真、level 被硬压成 continue，qq_close 永远过不去。
+// ---------------------------------------------------------------------------
+console.log('closure · 「吧」结尾是让步，不是提问：')
+{
+  // 这四条是核心回归
+  for (const text of ['好吧', '行吧', '就这样吧', '随你吧']) {
+    eq(classifyUtterance(text), 'ack', `「${text}」是附和`)
+    eq(assessClosure({ mine: '好', theirs: text }).openQuestion, false, `「${text}」不算没闭环的问题`)
+    eq(assessClosure({ mine: '好', theirs: text }).level, 'close', `「${text}」可以收尾`)
+  }
+
+  // 反向保护：真疑问靠疑问词，不靠「吗/呢」结尾，改「吧」不能误伤它们
+  for (const text of ['怎么办', '你说呢', '要不要来', '是不是真的']) {
+    eq(classifyUtterance(text), 'question', `「${text}」仍是疑问`)
+    eq(assessClosure({ mine: '好', theirs: text }).openQuestion, true, `「${text}」仍然拦住收尾`)
+  }
+  // 「能不能帮我看下」先命中 REQUEST_RE（看一下），本质是请求 —— 同样没闭环
+  eq(classifyUtterance('能不能帮我看下'), 'request', '「能不能帮我看下」是请求')
+  eq(assessClosure({ mine: '好', theirs: '能不能帮我看下' }).openQuestion, true, '请求仍然拦住收尾')
+
+  // 道别与附和保持原样（改之前就是对的，别改坏）
+  for (const text of ['晚安', '那先这样', '好吧，那我先睡了']) {
+    eq(classifyUtterance(text), 'ending', `「${text}」仍是道别`)
+  }
+  for (const text of ['嗯', '哈哈', '好的']) {
+    eq(classifyUtterance(text), 'ack', `「${text}」仍是附和`)
+  }
+
+  // 长句里带「吧」不算附和 —— 这是 YIELD_MAX_LEN 那道闸
+  eq(classifyUtterance('我觉得这样安排吧，明天再说'), 'substantive', '长句里的「吧」不算附和')
+  eq(assessClosure({ mine: '好', theirs: '我觉得这样安排吧，明天再说' }).openQuestion, false, '长句不会被当成提问')
+
+  // 「吧」结尾的**非让步**句必须仍被当成疑问（0.16.16 审核发现）：
+  //   让步靠白名单（YIELD_PATTERNS）认，疑问靠正则兜底 —— 两者不是二选一。
+  //   我一度把 QUESTION_RE 里的 `吧$` 删了，结果「这样可以吧」「对吧」被判成 ack，
+  //   openQuestion=false、qq_close 直接放行，等于把「对方在确认」当成「聊完了」。
+  for (const text of ['这样可以吧', '对吧', '你会来的吧', '真的吧']) {
+    eq(classifyUtterance(text), 'question', `「${text}」是疑问，不是让步`)
+    eq(assessClosure({ mine: '好', theirs: text }).openQuestion, true, `「${text}」必须拦住收尾`)
+  }
+
+  // 更多让步变体（同义说法五花八门，少写一个就会漏）
+  for (const text of ['算了吧', '先这样吧', '随你', '也行吧', '没问题', '你说了算']) {
+    const kind = classifyUtterance(text)
+    ok(kind === 'ack' || kind === 'ending', `「${text}」是附和或道别（实际 ${kind}）`)
+  }
+}
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed > 0 ? 1 : 0)

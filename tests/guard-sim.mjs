@@ -86,6 +86,9 @@ console.log('normUin：')
   eq(normUin(-1), '', '负数归成空')
   eq(normUin(''), '', '空串归成空')
   eq(normUin('abc'), '', '非数字归成空')
+  eq(normUin('1e3'), '', '指数写法不是十进制 QQ 号')
+  eq(normUin('1000.0'), '', '带小数点写法不是十进制 QQ 号')
+  eq(normUin('0x3e8'), '', '十六进制写法不是十进制 QQ 号')
   eq(normUin(null), '', 'null 归成空')
 }
 
