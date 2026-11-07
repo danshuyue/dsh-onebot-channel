@@ -329,5 +329,33 @@ ok(!clientSrc.includes('新配置下一轮轮询生效'), '保存提示不再说
   ok(autoBlock.includes('静默'), '自动查余额失败时保持静默（用户没主动问）')
 }
 
+// ---- 11. 语音模式：必须显示「正在生效 vs 已选择」（2026-11-07）--------------
+//
+// 用户反馈：「语音模式需要重启 dsh 才生效，这会让用户反直觉」。
+// 只写一句「要重启」不够 —— 用户改完保存、切出去再回来，看到的是自己刚选的
+// 新值，会以为已经生效，然后发现行为没变，于是当成 bug 报上来。
+// 所以卡片必须并排显示两个值，不一致时给警告。
+{
+  ok(clientSrc.includes('activeVoiceMode'), '前端读 runtime.activeVoiceMode（启动时生效的模式）')
+  ok(clientSrc.includes('function voiceModeStatus'), '有「正在生效 vs 已选择」的渲染函数')
+  ok(clientSrc.includes('重启 DSH 后才会换成'), '不一致时明说「重启后才换」')
+  ok(clientSrc.includes('当前模式：'), '一致时也显示「当前模式：X（已生效）」')
+  // 后端必须真的捕获启动值，否则前端拿到空串、对比退化成不显示
+  const apiSrc2 = readFileSync('lib/api.js')
+  ok(apiSrc2.includes('captureBootVoiceMode'), 'api.js 有 captureBootVoiceMode')
+  const indexSrc = readFileSync('lib/index.js')
+  ok(indexSrc.includes('captureBootVoiceMode(config)'), 'index.js 在 apply 里调了它（否则永远是空串）')
+}
+
+// ---- 12. 测试语句可自定义（2026-11-07）--------------------------------------
+{
+  ok(clientSrc.includes('voiceTestText'), '设置页有「测试语句」控件')
+  // 后端两处（工具自测 / 设置页按钮）必须同源，否则「按钮测的」和「工具测的」不是同一句
+  const toolSrc = readFileSync('lib/tool.js')
+  ok(toolSrc.includes('export function resolveVoiceTestText'), 'tool.js 导出 resolveVoiceTestText')
+  ok(readFileSync('lib/api.js').includes('resolveVoiceTestText(config)'), 'api.js 的按钮也用它')
+  ok(toolSrc.includes('resolveVoiceTestText(config)'), 'tool.js 的自测也用它')
+}
+
 process.stdout.write(`\n${pass} 过 ${fail} 败\n`)
 process.exit(fail === 0 ? 0 : 1)
