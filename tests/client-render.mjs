@@ -221,6 +221,38 @@ ok(binding.includes('个可选会话'), '绑定页显示可选会话数')
 ok(binding.includes('QQ 聊天账号转交'), '绑定页能选到工作区里的会话')
 ok(binding.includes('未绑定'), '绑定页有「未绑定（忽略）」这一项')
 
+// 列序（0.19.4）：用户要求「昵称在前，QQ 号在后」。
+// 这里靠渲染顺序断言 —— 文本是按节点顺序拼起来的，所以昵称必须**先**出现。
+// 只查「两个都在」是抓不住换位的（老代码也两个都在，只是顺序反了）。
+{
+  const nameAt = binding.indexOf('求道者见月')
+  const uinAt = binding.indexOf('3472302240')
+  ok(nameAt >= 0 && uinAt >= 0 && nameAt < uinAt,
+    `绑定表里昵称排在 QQ 号前面（昵称 @${nameAt}，QQ 号 @${uinAt}）`)
+
+  // 悬浮显示完整信息：昵称列和 QQ 号列的 title 都应该是「昵称（QQ xxx）」，
+  // 否则窄屏被省略号截掉以后就没法确认这行到底是谁。
+  let rowNode = null
+  const walk = (node) => {
+    if (rowNode !== null || node === null || typeof node !== 'object') return
+    if (Array.isArray(node)) { for (const child of node) walk(child); return }
+    if (node.props && node.props.className === 'qqb-row') { rowNode = node; return }
+    for (const child of node.children || []) walk(child)
+  }
+  seeds[8] = 'binding'
+  seeds[9] = 'all'
+  cursor = 0
+  const tree = section.type(Object.assign({}, section.props))
+  walk(tree)
+  const spans = (rowNode?.children ?? []).filter((child) => child && typeof child === 'object')
+  const nameSpan = spans.find((child) => child.props?.className === 'qqb-name')
+  const uinSpan = spans.find((child) => child.props?.className === 'qqb-uin')
+  ok(nameSpan?.props?.title === '求道者见月（QQ 3472302240）',
+    `昵称列悬浮显示完整信息（实际 ${JSON.stringify(nameSpan?.props?.title)}）`)
+  ok(uinSpan?.props?.title === '求道者见月（QQ 3472302240）',
+    `QQ 号列悬浮显示完整信息（实际 ${JSON.stringify(uinSpan?.props?.title)}）`)
+}
+
 // ---- 3. 对话节奏：合并窗口三个字段都在 ----
 const stance = paint('stance')
 ok(stance.includes('合并窗口') && stance.includes('回复前静默'), '对话节奏页有合并窗口与静默')
@@ -269,6 +301,28 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   ok(adv.includes('本机 GPT-SoVITS'), '两个引擎都列出来了（本机）')
   ok(adv.includes('Breeze'), '两个引擎都列出来了（Breeze）')
   ok(adv.includes('只是「默认引擎」') || adv.includes('默认引擎'), '写明了这只是默认引擎、不拦 MCP')
+
+  // 导出日志（0.19.4）：用户要把日志拿去云服务器上排查「间隔到底生效没有」。
+  // 这里除了「有这张卡」，还要确认链接真的指向 /log-file 且带 download ——
+  // 少了 download 浏览器会把这坨纯文本刷在标签页里，用户拿不到文件。
+  ok(adv.includes('导出日志'), '高级页有「导出日志」卡片')
+  {
+    let anchor = null
+    const walk = (node) => {
+      if (anchor !== null || node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) walk(child); return }
+      if (node.type === 'a' && String(node.props?.href ?? '').includes('/log-file')) { anchor = node; return }
+      for (const child of node.children || []) walk(child)
+    }
+    seeds[8] = 'advanced'
+    seeds[9] = 'all'
+    cursor = 0
+    walk(section.type(Object.assign({}, section.props)))
+    ok(anchor !== null, '导出日志卡片里有指向 /log-file 的下载链接')
+    ok(String(anchor?.props?.download ?? '') !== '', '链接带 download —— 点一下是另存为，不是把日志刷在标签页里')
+    ok(adv.includes('QQ 号') && (adv.includes('没有 key') || adv.includes('不含 key')),
+      '写明了日志里有什么（有 QQ 号、没有 key）—— 用户要把它发出来，得先知道这一点')
+  }
 
   const proactVoice = paint('proactive')
   ok(proactVoice.includes('能使用语音的对象'), '主动搭话页有语音对象名单')
