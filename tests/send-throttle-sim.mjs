@@ -25,6 +25,7 @@ import { mkdirSync, writeFileSync, readFileSync } from 'node:fs'
 import { useIsolatedHome } from './isolated-home.mjs'
 
 const HOME = useIsolatedHome('send-throttle-')
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const DATA = join(HOME, '.dsh')
 mkdirSync(DATA, { recursive: true })
 
@@ -141,6 +142,53 @@ console.log('跨调用分条间隔')
   const gaps = gapList()
   ok(sent.length === 2 && gaps[0] < 60,
     `不同目标不互相拖（实际 ${gaps.join(' / ')}ms —— 前面几组都是同目标，这里应该是立刻发）`)
+}
+
+// ---- ④a 链尾要自己摘掉，不能永久挂在 Map 里 ----
+//
+// 审核指出：`sendChains` 只写不删，每个 target 永久留一条 Promise 链，
+// 闭包还攥着最后一次的 segments/payload。量级是「目标数」不是「消息数」，
+// 所以不是无界泄漏，但长跑进程里就是只增不减。
+// ⚠️ 这条只能验「摘得掉」，不能验「摘得干净」—— 内部 Map 没导出，
+//    所以直接查源码里有没有那句自摘逻辑 + 跑一轮后行为不变。
+{
+  const src = readFileSync(join(ROOT, 'lib', 'outbound.js'), 'utf8')
+  ok(/if \(sendChains\.get\(key\) === tail\) sendChains\.delete\(key\)/.test(src),
+    '排空后自己从 sendChains 里摘掉（判 === tail，避免误删新接上的那条）')
+  resetSendThrottle()
+  sent.length = 0
+  await sendToQQ(target, '摘链后第一条')
+  await sendToQQ(target, '摘链后第二条')
+  const gaps = gapList()
+  ok(sent.length === 2 && gaps.length === 1 && gaps[0] >= FLOOR,
+    `摘链不影响节流（实际 ${gaps.join(' / ')}ms）`)
+}
+
+// ---- ④b 群和私聊是**两个桶**：同一个号既是好友又在群里时不能互相拖 ----
+//
+// 这一组是审核指出的缺口：原来的用例全发 `{kind:'private'}`，
+// 把 `throttleKeyOf` 里的 kind 前缀删掉（群和私聊撞同一个桶）14 条断言照样全绿。
+// 现实里 peerUin 既在好友表里、又常在群里 —— 撞桶的后果是「给群发一条，私聊就跟着等」。
+{
+  const cfg = getConfig()
+  cfg.splitDelayMs = 400
+  resetSendThrottle()
+  sent.length = 0
+  const groupTarget = { kind: 'group', id: '975663147' }
+  const privateTarget = { kind: 'private', id: '975663147' }
+  const started = Date.now()
+  await Promise.all([
+    sendToQQ(groupTarget, '群里的第一条'),
+    sendToQQ(privateTarget, '私聊的第一条')
+  ])
+  const elapsed = Date.now() - started
+  ok(sent.length === 2, '群和私聊各发了一条')
+  // 400ms 的间隔如果撞了桶，第二条就得等 400ms 以上；两个独立桶则各自立刻发。
+  ok(elapsed < 300,
+    `群与私聊是两个独立的节流桶（同一 id 也不互相等；实际总耗时 ${elapsed}ms，撞桶会是 ≥400ms）`)
+  ok(sent[0].payload.action === 'send_group_msg' && sent[1].payload.action === 'send_private_msg',
+    '两条确实一条进群、一条进私聊（不是同一路发了两遍）')
+  cfg.splitDelayMs = 120
 }
 
 // ---- ⑤ 间隔 0 = 立刻发（防 `Number(x) || 800`）----

@@ -274,6 +274,15 @@ ok(proactive.includes('对TA试一次'), '每个人都能单独试一次')
 ok(proactive.includes('下一个轮到'), '「现在试一次」会写明这次轮到谁（0.9.2）')
 ok(proactive.includes('静默开始'), '闸门参数还在')
 
+// 主动搭话「对谁开口」那张表也要昵称在前（0.19.5 审核指出两处风格不一致）。
+// ⚠️ 只查「两个都在」抓不住换位 —— 这里同样按渲染顺序断言。
+{
+  const pName = proactive.indexOf('求道者见月')
+  const pUin = proactive.indexOf('3472302240')
+  ok(pName >= 0 && pUin >= 0 && pName < pUin,
+    `主动搭话表里昵称也排在 QQ 号前面（昵称 @${pName}，QQ 号 @${pUin}）`)
+}
+
 // 名单行里勾选状态：全员模式 → 全勾
 const allModeTree = section.type(Object.assign({}, section.props))
 ok(allModeTree !== null, '全员模式渲染不炸')
@@ -343,6 +352,100 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   ok(proactFree.includes('一个都没勾 = 谁都不能用'), '自由档下写明了空名单 = 谁都不能用')
   ok(proactFree.includes('只对勾选的'), '自由档下能看出「名单非空 = 只对勾选的人」')
   seeds[7] = savedTunables
+}
+
+// ---- 5d. 0.19.5 的四项界面改动 ----
+{
+  // ① 语音卡：改完即存的状态提示必须在（用户明确要求这张卡不用点顶部保存）
+  const adv2 = paint('advanced')
+  ok(adv2.includes('改动自动保存') || adv2.includes('已保存'),
+    '语音卡头部显示了「改动自动保存」的状态（用户要求这张卡不用点顶部保存）')
+
+  // ② 注册入口 + 推广链接披露（需求 3）
+  ok(adv2.includes('点这里注册'), '语音卡里有 Breeze 的注册入口链接')
+  ok(adv2.includes('注册链接'), '注册链接做成了可配置项（不是硬编码某人的邀请码）')
+  {
+    let signup = null
+    const walk = (node) => {
+      if (signup !== null || node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) walk(child); return }
+      if (node.type === 'a' && String(node.props?.href ?? '').includes('breezeblue.ai')) { signup = node; return }
+      for (const child of node.children || []) walk(child)
+    }
+    seeds[8] = 'advanced'
+    seeds[9] = 'all'
+    cursor = 0
+    walk(section.type(Object.assign({}, section.props)))
+    ok(signup !== null, '注册链接指向 breezeblue.ai（留空时的官方登录页）')
+    ok(String(signup?.props?.target ?? '') === '_blank', '注册链接在新标签打开（别把设置页顶掉）')
+    ok(String(signup?.props?.rel ?? '').includes('noopener'), '外链带 rel=noopener')
+  }
+
+  // ③ 提示词变量说明 + 导入导出（需求 7）
+  ok(adv2.includes('全部可用变量'), '提示词卡片列出了全部可用变量')
+  for (const name of ['prefixTrimmed', 'ownerUin', 'senderLabel', 'senderUin', 'groupName']) {
+    ok(adv2.includes('{' + name + '}'), `变量说明里有 {${name}}`)
+  }
+  ok(adv2.includes('导出') && adv2.includes('导入'), '提示词卡片有导入 / 导出按钮')
+
+  // ④ 语音对象名单：私聊区即使一个会话都没绑也要列出好友（需求 5）
+  //    原来 boundPrivateKeys() 只收有 sessionId 的，用户那条私聊没选会话 →
+  //    整块变成「还没有绑好会话的私聊」，看起来像「私聊不见了」。
+  const savedT = seeds[7]
+  const savedDraft = seeds[2]
+  const savedState = seeds[0]
+  seeds[7] = Object.assign({}, seeds[7], { voiceMode: 'free' })
+  // draft 里那唯一一条**没有** sessionId —— 正是用户截图里的现场
+  seeds[2] = { private: { '1321833118': { sessionId: '', prefix: '[管理员]' } }, group: {} }
+  // 再塞一个「协议端认识、但既不在绑定表也不在 routes 里」的好友（1437212904 最后的红薯）：
+  // 这条是专门为了抓「候选来源漏了 data.friends」这个变异 —— 只靠 draft/routes 也凑得出
+  // 一个名字的话，把 friends 那一行删掉测试照样绿，那就等于没测到。
+  seeds[0] = Object.assign({}, seeds[0], {
+    friends: (seeds[0].friends || []).concat([{ id: '1437212904', name: '最后的红薯' }])
+  })
+  const proactUnbound = paint('proactive')
+  seeds[7] = savedT
+  seeds[2] = savedDraft
+  seeds[0] = savedState
+  // ⚠️ 这里只能查语音卡那句原文（「再回来决定谁**能收语音**」）。
+  //    「主动搭话 → 对谁开口」那张表**仍然**只收已绑会话的私聊，那是另一回事
+  //    （对没绑会话的人搭话没有意义，消息投不出去），不要顺手把它也放宽了。
+  ok(!proactUnbound.includes('再回来决定谁能收语音'),
+    '没绑会话时不再把整块语音名单藏起来（原来会替换成一句「还没有绑好会话的私聊」）')
+  ok(proactUnbound.includes('学海难行') || proactUnbound.includes('1321833118'),
+    '没绑会话的好友仍然列在语音名单里')
+  ok(proactUnbound.includes('最后的红薯'),
+    '候选里包含「只在协议端好友列表里、没绑会话也没进绑定表」的人（来源不能只剩 draft/routes）')
+  ok(proactUnbound.includes('未绑会话'), '没绑会话的好友标出了「未绑会话」')
+
+  // ⑤ 顶栏 + 分区条固定，内容区自己滚（需求 6）
+  //    断言的是**结构**：sticky 那层必须把标题行和分区条包进去，而 pane 必须在它**外面**
+  //    —— 如果 pane 被包进 sticky，整页就都粘住了，等于没做。
+  {
+    seeds[8] = 'advanced'
+    seeds[9] = 'all'
+    cursor = 0
+    const tree = section.type(Object.assign({}, section.props))
+    // 顶层是 SectionErrorBoundary 包着 QqBridgeSection，不是 .qqb-wrap 本身 —— 得先找出来
+    let wrap = null
+    const findWrap = (node) => {
+      if (wrap !== null || node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) findWrap(child); return }
+      if (node.props && node.props.className === 'qqb-wrap') { wrap = node; return }
+      for (const child of node.children || []) findWrap(child)
+    }
+    findWrap(tree)
+    ok(wrap !== null, '能找到 .qqb-wrap 根节点')
+    const kids = (wrap?.children ?? []).filter((child) => child && typeof child === 'object')
+    const sticky = kids.find((child) => child.props?.className === 'qqb-sticky')
+    ok(sticky !== undefined, '第一层里有 .qqb-sticky（标题行 + 分区条）')
+    const stickyKids = (sticky?.children ?? []).filter((child) => child && typeof child === 'object')
+    ok(stickyKids.some((child) => child.props?.className === 'qqb-head'), '标题行被包进 sticky')
+    ok(stickyKids.some((child) => child.props?.className === 'qqb-tabs'), '分区条被包进 sticky')
+    ok(!stickyKids.some((child) => child.props?.className === 'qqb-pane'),
+      '⚠️ 内容区**没有**被包进 sticky（否则整页都粘住，等于没做）')
+    ok(kids.some((child) => child.props?.className === 'qqb-pane'), '内容区仍然是 sticky 的兄弟节点')
+  }
 }
 
 // ---- 5b. 「配置」分区：HTTP API 与 WS 两条链路都在（0.15.0） ----
