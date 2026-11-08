@@ -318,12 +318,16 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   {
     let anchor = null
     let cfgAnchor = null
+    let diagAnchor = null
     const walk = (node) => {
       if (node === null || typeof node !== 'object') return
       if (Array.isArray(node)) { for (const child of node) walk(child); return }
       const href = String(node.props?.href ?? '')
       if (node.type === 'a' && anchor === null && href.includes('/log-file')) { anchor = node }
       if (node.type === 'a' && cfgAnchor === null && href.includes('/config-export')) { cfgAnchor = node }
+      // ⚠️ 用 includes('/diag-export') 而不是 includes('diag')：后者会被 /config-export
+      //    之类的近名字带绿（而且顺序上 config 先命中就永远拿不到 diag）
+      if (node.type === 'a' && diagAnchor === null && href.includes('/diag-export')) { diagAnchor = node }
       for (const child of node.children || []) walk(child)
     }
     seeds[8] = 'advanced'
@@ -340,6 +344,14 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
     ok(String(cfgAnchor?.props?.download ?? '').includes('.json'),
       '配置下载下来是 .json（不是把 JSON 刷在标签页里）')
     ok(adv.includes('打码') || adv.includes('已设置'), '写明了凭据会打码 —— 用户才敢把它发出来')
+    // 诊断包（0.19.7，用户问「导出日志是不是该搭配导出 DSH 的日志」）：
+    // 第三个按钮。⚠️ 断言要点是「href 指向 /diag-export」「带 download」「下载名是 .json」，
+    // 光断言文案里有「诊断包」抓不住「按钮指向了错的地址」。
+    ok(diagAnchor !== null, '导出卡片里有指向 /diag-export 的第三个下载链接')
+    ok(String(diagAnchor?.props?.download ?? '').includes('.json'),
+      `诊断包下载下来是 .json（实际「${String(diagAnchor?.props?.download ?? '')}」）`)
+    ok(adv.includes('工具调用'), '写明了诊断包会带上工具调用记录 —— 这正是它比前两份多出来的东西')
+    ok(adv.includes('队列'), '写明了诊断包里含出站队列状态（「消息卡住」要看的就是它')
   }
 
   const proactVoice = paint('proactive')
