@@ -1,7 +1,7 @@
 /**
  * 连发消息导致重复发送的专项测试：node tests/dup-send-sim.mjs，退出码 0 = 全过。
  *
- * 现象（树树 2026-10-28 反馈）：
+ * 现象（用户 2026-10-28 反馈）：
  *   「我昨天教她收藏表情包，有一次我没有等她发完消息就发下一条了，
  *     结果她一条回复的消息连续发了好几遍。」
  *
@@ -118,7 +118,7 @@ const { enqueueOutbound, outbound, flushOutbound } = await import('../lib/outbou
 
 console.log('连发消息 → 重复发送：')
 
-// 场景：树树连着发两条，agent 还没跑完第一回合
+// 场景：用户连着发两条，agent 还没跑完第一回合
 {
   sent.length = 0
   outbound.clear()

@@ -163,7 +163,7 @@ console.log('\n4. 渲染：不认识的变量原样保留（渲染在主链路�
 console.log('\n5. 身份标签：三个函数的分工不能串：')
 {
   const asGroupmate = { isOwner: false, nickname: '暮秋槐', senderUin: '1071787454' }
-  const asOwner = { isOwner: true, nickname: '树树', senderUin: '1321833118' }
+  const asOwner = { isOwner: true, nickname: '阿明', senderUin: '1321833118' }
 
   ok(prompttext.senderLabelOf(asGroupmate).includes('不是用户本人'), 'senderLabel 里明写「不是用户本人」')
   ok(prompttext.senderLabelOf(asGroupmate).includes('群友'), 'senderLabel 含「群友」（护栏依赖这个）')

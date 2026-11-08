@@ -41,7 +41,7 @@ const cfg = getConfig()
 console.log('配置默认值（README 的配置示例必须跟 config.js 的 DEFAULTS 一致）：')
 {
   // ⚠️ 读的是 config.js 导出的 DEFAULTS（代码默认值），**不是** getConfig() 的结果 ——
-  //   后者会被用户的 ~/.dsh/qq-bridge.config.json 覆盖（树树自己调过 pollMs 等），
+  //   后者会被用户的 ~/.dsh/qq-bridge.config.json 覆盖（用户自己调过 pollMs 等），
   //   拿它当断言基准，测试就会误报「README 写错了」。
   //   README 的配置示例列的是**代码默认值**，那才是要跟 DEFAULTS 对齐的东西。
   const expected = {

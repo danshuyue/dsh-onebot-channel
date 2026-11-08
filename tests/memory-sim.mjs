@@ -72,8 +72,8 @@ remember('private:1', { fact: '喜欢猫' })
 eq(loadMemory('private:1').facts.length, 1, '同一句话不重复记')
 
 // 4. 称呼
-remember('private:1', { nick: '树树' })
-ok(describeMemory('private:1').includes('称呼：树树'), '称呼写进卡里')
+remember('private:1', { nick: '阿明' })
+ok(describeMemory('private:1').includes('称呼：阿明'), '称呼写进卡里')
 
 // 5. 上限 8 条，挤掉最老的
 for (let i = 0; i < 10; i += 1) remember('private:2', { fact: `事实${i}` })
