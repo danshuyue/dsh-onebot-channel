@@ -37,13 +37,33 @@ ok(TEXT.includes('QQ'), '限定了只管 QQ 来的消息（这条段落对所有
 // 段落会进每一次请求，必须短
 ok(TEXT.length < 700, `正文够短，不会每回合烧太多 token（${TEXT.length} 字）`)
 
+// ---- 0.20.2：群聊那段补充说明（按配置拼）----
+//
+// 背景：群里默认关掉自动转发后，正文**不会**进群。而上面那段纪律（以及
+// `QQ对话说明.md` 那张卡）一直在说「QQ 上来的消息正常回就行」——
+// 那句话在私聊里仍然成立，在群里**已经不成立**了。不补这一段，
+// 她会照旧写正文、群里一片安静，表现成「@ 了她、她不理人」。
+{
+  const off = prompt.longTaskSectionText({ autoForwardGroup: false })
+  const on = prompt.longTaskSectionText({ autoForwardGroup: true })
+  ok(off.includes('群里**不会**'), '群聊自动转发关着时，明说「群里不会自动转发」')
+  ok(off.includes('qq_send'), '并且指明要在群里说话得用 qq_send')
+  ok(off.includes('QQ 私聊'), '同时点明私聊不受影响（别让她以为到处都要手动发）')
+  // 反向：群开着（回到旧行为）时不能再说「群里不会」—— 那是撒谎，还会让她多调一次工具
+  ok(!on.includes('群里**不会**'), '群聊自动转发开着时不加这段说明')
+  ok(on === prompt.LONG_TASK_SECTION_TEXT, '开着时正文与旧版逐字一致（不改变存量行为）')
+  // 段落每回合都要进请求，多出来的这段也必须够短
+  ok(off.length < 900, `拼上说明后仍然够短（${off.length} 字）`)
+}
+
 // ---- 注册形状 ----
 {
   const captured = []
   const fakeCtx = {
     get: () => ({ section: (value) => { captured.push(value); return () => {} } })
   }
-  const mounted = prompt.mountPromptSection(fakeCtx)
+  // 显式给配置，别让它读真实配置文件（否则断言随机器而变）
+  const mounted = prompt.mountPromptSection(fakeCtx, { autoForwardGroup: true })
   ok(mounted === true, '服务可用时报告挂载成功')
   ok(captured.length === 1, `只注册一次（实际 ${captured.length}）`)
   const section = captured[0] ?? {}
@@ -55,6 +75,14 @@ ok(TEXT.length < 700, `正文够短，不会每回合烧太多 token（${TEXT.le
   ok(section.order > 10000, '排在宿主 TOOL_* 段落之后')
   ok(section.order < 10200, '排在部署人设收尾之前（人设保留最后一句话）')
   ok(section.text === TEXT, '注册的正文就是那段纪律')
+  // 默认配置下（群关）注册出去的文本必须带上群聊说明
+  const captured2 = []
+  prompt.mountPromptSection(
+    { get: () => ({ section: (value) => { captured2.push(value); return () => {} } }) },
+    { autoForwardGroup: false }
+  )
+  ok(String(captured2[0]?.text ?? '').includes('群里**不会**'),
+    '群聊关着时，真正注册出去的那一段带上了群聊说明')
 }
 
 // ---- 拿不到服务时：只少一段提示，不抛 ----
