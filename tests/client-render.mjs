@@ -384,7 +384,9 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
 
   // ② 注册入口 + 推广链接披露（需求 3）
   ok(adv2.includes('点这里注册'), '语音卡里有 Breeze 的注册入口链接')
-  ok(adv2.includes('注册链接'), '注册链接做成了可配置项（不是硬编码某人的邀请码）')
+  // 0.20.0：默认值换成了部署者自己的邀请链接（用户要求），但**仍然从配置读** ——
+  // 断言的是「读 t.voiceSignupUrl」这个接法，不是「某处写死了某个码」。
+  ok(adv2.includes('注册链接'), '注册链接仍然是一个从配置读的值（换链接不用改代码）')
   {
     let signup = null
     const walk = (node) => {
@@ -397,9 +399,112 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
     seeds[9] = 'all'
     cursor = 0
     walk(section.type(Object.assign({}, section.props)))
-    ok(signup !== null, '注册链接指向 breezeblue.ai（留空时的官方登录页）')
+    ok(signup !== null, '注册链接指向 breezeblue.ai')
     ok(String(signup?.props?.target ?? '') === '_blank', '注册链接在新标签打开（别把设置页顶掉）')
     ok(String(signup?.props?.rel ?? '').includes('noopener'), '外链带 rel=noopener')
+  }
+
+  // ---- 0.20.0：余额那一行的渲染（用户报的 bug 就在这里）----
+  //
+  // 现场：顶部绿条写着「余额 1916.0 credits」，卡片那一行却写「查不到」。
+  // 根因是渲染判的是 `vs.account.ok === true`，而成功路径塞进去的是
+  // 后端的 account 子对象（**没有 ok 字段**）—— 恒假，于是永远走「查不到」。
+  //
+  // 这里用「归并后的形状」（accountStateOf 的产出：ok 在 account 里）渲染一遍。
+  // ⚠️ 光断言「数字出现了」不够：查不到分支也会打印别的字，得同时断言
+  //    「没有出现『查不到』」—— 那才是用户看到的那句错话。
+  {
+    const savedVoiceState = seeds[12]
+    const savedTunablesForBalance = seeds[7]
+    // ⚠️ 余额那一行在 **breezeBlock 里**：整块只在「默认引擎 = Breeze」时渲染。
+    //    不切引擎的话这段根本不会出现在树上 —— 而那就变成一个恒绿的断言。
+    seeds[7] = Object.assign({}, seeds[7], { voiceEngine: 'breeze' })
+    seeds[8] = 'advanced'
+    seeds[9] = 'all'
+
+    /**
+     * 取「余额那一行」里的**值那个子节点**（`key: 'v'`）的文本。
+     *
+     * ⚠️ 为什么不能取整行（变异验证逼出来的，两个变异都是同一个根因）：
+     *    ① 「超时那行要包含『刷新』」—— 整行里本来就有一个「刷新」按钮，
+     *       于是把文案砍成一句光秃秃「超时了」，断言照样绿。同一个事实被两个
+     *       因素满足 = 假绿，判不出是哪一边在起作用。
+     *    ② 「今日已用」如果只断言整行文本，把那个 span 设成 display:none 也绿
+     *       —— 文字仍留在树里，测的是「字符串出现过」，不是「它渲染了」。
+     *    所以：值节点单独取，断言只落在它身上。
+     */
+    function balanceValueText() {
+      // ⚠️ 两步走：先定位「余额那一行」（key='bal'），再在**它的子树里**找 key='v'。
+      //    直接全树找 key='v' 会撞到提示词卡片里的变量说明（那里也有 key='v'），
+      //    实测拿到的是「私聊可用变量：{prefix}…」—— 断言全红，但那是定位错了、
+      //    不是实现坏了。定位必须收在被测区域内。
+      let row = null
+      const findRow = (node) => {
+        if (row !== null || node === null || typeof node !== 'object') return
+        if (Array.isArray(node)) { for (const child of node) findRow(child); return }
+        if (node.props && node.props.key === 'bal' && Array.isArray(node.children)) { row = node; return }
+        for (const child of node.children || []) findRow(child)
+      }
+      findRow(section.type(Object.assign({}, section.props)))
+      if (row === null) return null
+      let valueNode = null
+      const findValue = (node) => {
+        if (valueNode !== null || node === null || typeof node !== 'object') return
+        if (Array.isArray(node)) { for (const child of node) findValue(child); return }
+        if (node.props && node.props.key === 'v' && Array.isArray(node.children)) { valueNode = node; return }
+        for (const child of node.children || []) findValue(child)
+      }
+      findValue(row)
+      if (valueNode === null) return null
+      const parts = []
+      const collect = (n) => {
+        if (n === null || n === undefined || n === true || n === false) return
+        if (typeof n === 'string' || typeof n === 'number') { parts.push(String(n)); return }
+        if (Array.isArray(n)) { for (const c of n) collect(c); return }
+        for (const c of n.children || []) collect(c)
+      }
+      collect(valueNode.children)
+      return parts.join('')
+    }
+
+    seeds[12] = {
+      voices: [], voiceKeyword: '', total: 0, test: null, hasKey: true,
+      account: {
+        ok: true, timeout: false, error: '',
+        balance: 1916.0, pending: false, plan: 'free', concurrency: 1, commercial: false,
+      },
+      quota: { used: 0, limit: 1000, remaining: 1000, unlimited: false },
+    }
+    cursor = 0
+    const balVal = balanceValueText()
+    ok(balVal !== null, '余额那一行的值节点真的渲染出来了（拿不到它就等于下面几条全是恒真的）')
+    const balText = String(balVal ?? '')
+    ok(balText.includes('1916.0'), `查得到余额时显示 1916.0（实际：${balText.slice(0, 120)}）`)
+    ok(!balText.includes('查不到'), '查得到余额时不出现「查不到」')
+    ok(balText.includes('free') && balText.includes('并发 1'),
+      '余额旁边带上套餐与并发（用户要求说清楚）')
+    ok(balText.includes('今天已用 0 / 1000'),
+      `今日额度在值节点里（实际：${balText.slice(0, 160)}）`)
+
+    // 查不到的那一侧：仍然是「超时」与「配错了」分开说，不许混成一句
+    seeds[12] = Object.assign({}, seeds[12], {
+      account: { ok: false, timeout: true, error: '' }, quota: null,
+    })
+    cursor = 0
+    const timeoutText = String(balanceValueText() ?? '')
+    ok(timeoutText.includes('超时') && timeoutText.includes('刷新'),
+      `超时文案自己就写了「刷新」（不能靠同一行的刷新按钮凑数，实际：${timeoutText.slice(0, 120)}）`)
+    ok(!timeoutText.includes('今天已用'), '查不到时不显示额度（否则像是「账户是好的，只是没显示钱」）')
+
+    seeds[12] = Object.assign({}, seeds[12], {
+      account: { ok: false, timeout: false, error: 'key 不对' }, quota: null,
+    })
+    cursor = 0
+    ok(String(balanceValueText() ?? '').includes('key 不对'),
+      '真的配错时把后端那句原话转出来（不吞成「查不到」）')
+
+    seeds[12] = savedVoiceState
+    seeds[7] = savedTunablesForBalance
   }
 
   // ③ 提示词变量说明 + 导入导出（需求 7）

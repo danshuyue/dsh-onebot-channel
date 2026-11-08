@@ -164,6 +164,9 @@ ok(notRendered.length === 0, `可写字段都渲染出了控件${notRendered.len
 // ---- 7. 刻意不给控件的字段：必须写在白名单里，别静默漏掉 --------------------
 const DELIBERATE = {
   routes: '路由表由绑定表格接管',
+  // 0.20.0：被 notifyTarget（三选一）取代，loadConfig 负责把旧值迁进去。
+  // 再给它一个控件就是「一个行为两个真相源」—— 界面选「原路」、开关是关的，到底听谁的？
+  notifyTurnFailures: '已被 notifyTarget 三选一取代（存量 false 会被迁成 off）',
   token: '凭据，前端不回显也不该可写',
   selfUin: '登录后由 OneBot 报回',
   peerUin: '私聊对象，由路由表取代',
