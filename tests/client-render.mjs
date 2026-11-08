@@ -507,6 +507,40 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
     seeds[7] = savedTunablesForBalance
   }
 
+  // ---- 0.20.1：忽略指令的控件（用户要求「可配置」）----
+  //
+  // 断言重点不是「文案里有『忽略指令』」，而是**输入框的 value 是逗号拼起来的表**：
+  // 那才证明 listField 真的把数组接上了。只查文案的话，把 value 写成空串也绿 ——
+  // 而用户会看到自己的 #sl 不见了、保存一次就把配置清空。
+  {
+    const savedT = seeds[7]
+    seeds[7] = Object.assign({}, seeds[7], { ignoreCommands: ['#sl', '/status'] })
+    seeds[8] = 'stance'
+    seeds[9] = 'all'
+    cursor = 0
+    let inputNode = null
+    const walk = (node) => {
+      if (inputNode !== null || node === null || typeof node !== 'object') return
+      if (Array.isArray(node)) { for (const child of node) walk(child); return }
+      if (node.props && node.props.key === 'ignoreCommands' && Array.isArray(node.children)) {
+        const findInput = (n) => {
+          if (inputNode !== null || n === null || typeof n !== 'object') return
+          if (Array.isArray(n)) { for (const c of n) findInput(c); return }
+          if (n.type === 'input') { inputNode = n; return }
+          for (const c of n.children || []) findInput(c)
+        }
+        findInput(node)
+        return
+      }
+      for (const child of node.children || []) walk(child)
+    }
+    walk(section.type(Object.assign({}, section.props)))
+    ok(inputNode !== null, '「忽略指令」那一格真的渲染出了输入框')
+    ok(String(inputNode?.props?.value ?? '') === '#sl, /status',
+      `输入框里是逗号拼起来的表（实际「${String(inputNode?.props?.value ?? '')}」）—— 空串就说明数组没接上`)
+    seeds[7] = savedT
+  }
+
   // ③ 提示词变量说明 + 导入导出（需求 7）
   ok(adv2.includes('全部可用变量'), '提示词卡片列出了全部可用变量')
   for (const name of ['prefixTrimmed', 'ownerUin', 'senderLabel', 'senderUin', 'groupName']) {

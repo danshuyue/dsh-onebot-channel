@@ -297,8 +297,127 @@ runMutation({
   expectRed: '余额旁边带上套餐与并发'
 })
 
+line('\n== 变异 14~21：忽略指令（0.20.1）==')
+//
+// 用户需求：「由于 snowluma 有关键词 #sl 用于查看状态。添加忽略指令配置，默认 #sl，
+//   就是发送的是 #sl 就不处理。可配置。」
+// 这个功能有三个经典的写错方式，每个都配一个变异：做成前缀匹配（吞人话）、
+// 一批里只拦第一条（挖半句话）、拦了不推进游标（每 2 秒重投）。
+
+// 变异 14：做成前缀匹配 —— 会把「#sl 你好」这种人话一起吞掉
+runMutation({
+  name: '变异14 做成 startsWith 前缀匹配',
+  edits: [{
+    file: join('lib', 'commands.js'),
+    from: '    if (body === word) return true',
+    to: '    if (body.startsWith(word)) return true'
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '「#sl 你好」不命中'
+})
+
+// 变异 15：大小写不敏感 —— 用户写 #SL 是另一个词，不该按 #sl 处理
+runMutation({
+  name: '变异15 大小写不敏感',
+  edits: [{
+    file: join('lib', 'commands.js'),
+    from: '    if (body === word) return true',
+    to: '    if (body.toLowerCase() === word.toLowerCase()) return true'
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '大小写不同不命中'
+})
+
+// 变异 16：空表也忽略所有 —— 破坏「空 = 关闭这项功能」
+runMutation({
+  name: '变异16 空表也忽略所有',
+  edits: [{
+    file: join('lib', 'commands.js'),
+    from: "  const body = String(text ?? '').trim()\n  if (body === '') return false\n  for (const item of list) {",
+    to: "  const body = String(text ?? '').trim()\n  if (body === '') return false\n  if (list.length === 0) return true\n  for (const item of list) {"
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '空表 = 关闭功能'
+})
+
+// 变异 17：私聊命中后不推进游标 —— 轮询会每 2 秒把同一条 #sl 重投一遍
+runMutation({
+  name: '变异17 私聊命中后不推进游标',
+  edits: [{
+    file: join('lib', 'poll.js'),
+    from: "    noteCoalesced('ignore', `ignore:private:${uin}`, `private ${uin} 命中忽略指令，整批不投`)\n    advancePrivateCursor(state, uin, messages)",
+    to: "    noteCoalesced('ignore', `ignore:private:${uin}`, `private ${uin} 命中忽略指令，整批不投`)"
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '游标推进了'
+})
+
+// 变异 18：只查第一条 —— 一批里 #sl 在第二条时就漏了，她会看到半句话
+runMutation({
+  name: '变异18 只检查第一条消息',
+  edits: [{
+    file: join('lib', 'commands.js'),
+    from: '  for (const item of messages) {\n    const segments = item !== null && typeof item === \'object\' && Array.isArray(item.message)',
+    to: '  for (const item of messages.slice(0, 1)) {\n    const segments = item !== null && typeof item === \'object\' && Array.isArray(item.message)'
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '整批被忽略'
+})
+
+// 变异 19：群聊用 textOf（at 段会被渲染成 @号，判不出 #sl）
+//
+// ⚠️ 这个变异是本轮**真踩到过的 bug**：第一版实现用的就是 text，测试立刻红了。
+//    留在这里当永久看守 —— at 段污染这件事很容易在下次重构时被忘掉。
+runMutation({
+  name: '变异19 群聊用 textOf（at 段污染）',
+  edits: [{
+    file: join('lib', 'poll.js'),
+    from: '  if (isIgnoredMessage(textSegmentsOf(message.message), config.ignoreCommands)) {',
+    to: '  if (isIgnoredMessage(text, config.ignoreCommands)) {'
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: '群里的 #sl 被跳过'
+})
+
+// 变异 20：默认值不是 #sl
+runMutation({
+  name: '变异20 默认值改成空表',
+  edits: [{
+    file: join('lib', 'config.js'),
+    from: "  ignoreCommands: ['#sl'],",
+    to: '  ignoreCommands: [],'
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: 'DEFAULTS.ignoreCommands 含 #sl'
+})
+
+// 变异 21：publicConfig 把空表兜回默认 —— 用户清空了，重进面板又冒出 #sl
+runMutation({
+  name: '变异21 publicConfig 兜底成默认表',
+  edits: [{
+    file: join('lib', 'api.js'),
+    from: "    ignoreCommands: Array.isArray(config.ignoreCommands)\n      ? config.ignoreCommands.map((v) => String(v ?? '')).filter((v) => v !== '')\n      : [],",
+    to: "    ignoreCommands: (Array.isArray(config.ignoreCommands) && config.ignoreCommands.length > 0)\n      ? config.ignoreCommands.map((v) => String(v ?? '')).filter((v) => v !== '')\n      : ['#sl'],"
+  }],
+  test: 'ignore-command-sim.mjs',
+  expectRed: 'publicConfig 如实返回空表'
+})
+
+// 变异 22：listField 的 value 写成空串 —— 控件在、但用户看不到自己的配置，
+// 保存一次就把表清空（「界面能改、改了没用」的另一种形状）
+runMutation({
+  name: '变异22 listField 的 value 不接数组',
+  edits: [{
+    file: join('lib', 'client.js'),
+    from: '              value: raw.join(\', \'),',
+    to: "              value: '',"
+  }],
+  test: 'client-render.mjs',
+  expectRed: '输入框里是逗号拼起来的表'
+})
+
 line('\n== 基线：不改动时必须全绿 ==')
-for (const test of ['notice-route-sim.mjs', 'wait-anchor-sim.mjs', 'client-render.mjs']) {
+for (const test of ['notice-route-sim.mjs', 'wait-anchor-sim.mjs', 'client-render.mjs', 'ignore-command-sim.mjs']) {
   const work = join(tmpdir(), `qq-base-${process.pid}-${Math.random().toString(36).slice(2, 8)}`)
   const home = join(work, 'home')
   mkdirSync(join(home, '.dsh'), { recursive: true })
