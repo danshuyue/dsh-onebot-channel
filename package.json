@@ -34,7 +34,13 @@
     "cordis.patch.yml",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!docs/qq-bridge-diag-*",
+    "!docs/qq-bridge-load.log",
+    "!docs/*.log",
+    "!docs/维护索引.md",
+    "!docs/会话设定-设计稿.md",
+    "!docs/水群潜水-设计稿.md"
   ],
   "dsh": {
     "manifestVersion": 1,
@@ -70,7 +76,8 @@
     "@deepseek-ai/cordis": "^4.0.1"
   },
   "engines": {
-    "node": ">=22.19"
+    "node": ">=22.19",
+    "dsh": ">=0.2.0-rc.1"
   },
   "repository": {
     "type": "git",
