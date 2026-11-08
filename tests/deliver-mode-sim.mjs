@@ -46,7 +46,8 @@ writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
   // 只钉「用哪个入口投递」，别让静默 / 分条 / 转发 / 记忆掺进来
   replyQuietMs: 0,
   splitReply: false,
-  autoForwardReply: false,
+  autoForwardPrivate: false,
+  autoForwardGroup: false,
   backfillOnStart: false,
   memoryEnabled: false,
   proactiveEnabled: false,
@@ -66,7 +67,8 @@ const { clearWaitBudget, waitBudgetLeft, chargeWaitBudget, resetWaitBudget } = a
 loadConfig()
 Object.assign(getConfig(), {
   replyQuietMs: 0,
-  autoForwardReply: false,
+  autoForwardPrivate: false,
+  autoForwardGroup: false,
   memoryEnabled: false,
   fallbackToLiveSession: false
 })

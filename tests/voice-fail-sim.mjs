@@ -14,7 +14,7 @@
  *
  * 出站有**两条平行的路**：
  *   · `qq_send`（模型主动调）→ `sendToQQ` → 按标点/模型给的 segments 分条
- *   · 自动转发兜底（`autoForwardReply`）→ 回合结束后把正文再发一遍
+ *   · 自动转发兜底（`autoForwardPrivate`）→ 回合结束后把正文再发一遍
  *
  * 正常情况下它们互斥：`flushOutbound` 会检查「本回合有没有成功的 qq_send 调用」
  * （`tool/call` + `tool/result` 未报错），有就跳过自动转发。

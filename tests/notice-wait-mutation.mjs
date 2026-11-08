@@ -56,7 +56,7 @@ function runMutation({ name, edits, test, expectRed }) {
   writeFileSync(join(data, 'qq-bridge.config.json'), JSON.stringify({
     enabled: true, selfUin: 3566906627, peerUin: 1321833118, ownerUin: 1321833118,
     onebotHttp: 'http://127.0.0.1:3000/', token: 'test-token', splitReply: false,
-    replyQuietMs: 0, mergeWindowMs: 0, autoForwardReply: false, backfillOnStart: false,
+    replyQuietMs: 0, mergeWindowMs: 0, autoForwardPrivate: false, autoForwardGroup: false, backfillOnStart: false,
     memoryEnabled: false, proactiveEnabled: false, wsEnabled: false,
     groupUins: ['975663147'],
     routes: {

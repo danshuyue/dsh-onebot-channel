@@ -255,5 +255,205 @@ console.log('连发消息 → 重复发送：')
   eq(sent[0]?.params?.message?.[0]?.data?.text, '发好啦喵', '转发的是最后一条的正文（reasoning 不混进去）')
 }
 
+// ===========================================================================
+// 0.20.2：qq_send 判定要认出 PTC（run_code）子调用 + 同会话两回合不许串账
+// ===========================================================================
+//
+// ## 先说清楚一个**被推翻**的假设（免得后人重犯）
+//
+// 线上现场（诊断包 2026-11-08T13-59-37）确实是自动转发把 225 字发进群了：
+//   13:56:58 [out] 分 4 条发送，字数 22/107/30/61
+//   13:56:58 [out] 已转发回复 225 字 -> group
+// 但原因**不是**「长回合里 qq_send 记录丢了」。我一开始这么以为，后来做变异验证时
+// 把判定逐字还原成 0.20.1 的旧代码，下面「长回合中途用过 qq_send」那条**照样绿**
+// —— 说明旧代码本来就看得见。原因是 `scanFrom = Math.min(entry.cursor, state.matchCursor)`，
+// 而 entry.cursor 只在找到 turn/end 时才推进，所以回合进行中每轮都从同一位置重扫。
+//
+// 真正的原因是两件事各占一半：
+//   ① 群聊**本来就会**自动转发（autoForwardReply 是个全局开关，从没区分渠道）
+//      —— 这才是用户报的「群里不该发汇报却发了」的正解，见本文件末尾的渠道开关一节；
+//   ② `run_code` 里调的 qq_send 记的是 `tool/ptc-dispatch*`，不是 `tool/call`，
+//      所以那类回合确实会被判成「没用过 qq_send」→ 重复转发。这一节测的就是它。
+console.log('\nqq_send 判定：PTC（run_code）子调用也要认出来（0.20.2）：')
+
+// 场景 1：run_code 里调 qq_send —— 事件是 tool/ptc-dispatch*，没有 tool/call。
+// 修复前：判定只认 tool/call → 认为没用过 → 自动转发再发一遍（本断言变红）。
+{
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+
+  enqueueOutbound('session-PTC', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'tool/call', data: { name: 'run_code', callId: 'root-1' } },
+    { seq: 13, type: 'tool/ptc-dispatch-start', data: { name: 'qq_send', subCallId: 'sub-1', parentCallId: 'root-1' } },
+    { seq: 14, type: 'tool/ptc-dispatch', data: { name: 'qq_send', subCallId: 'sub-1', isError: false } },
+    { seq: 15, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '汇报：都改好了' }] } } },
+    { seq: 16, type: 'turn/end' }
+  ]
+  seq = 16
+  await flushOutbound()
+
+  eq(sent.length, 0, 'run_code 里调过 qq_send → 正文不再自动转发一遍')
+}
+
+// 场景 2（反向保护）：run_code 里的 qq_send **失败**了 → 必须改走自动转发兜底，
+// 否则那条回复就永远发不出去（「她突然不回话了」）。
+{
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+
+  enqueueOutbound('session-PTCF', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'tool/call', data: { name: 'run_code', callId: 'root-2' } },
+    { seq: 13, type: 'tool/ptc-dispatch-start', data: { name: 'qq_send', subCallId: 'sub-2', parentCallId: 'root-2' } },
+    { seq: 14, type: 'tool/ptc-dispatch', data: { name: 'qq_send', subCallId: 'sub-2', isError: true, error: 'fetch failed' } },
+    { seq: 15, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这条要兜底。' }] } } },
+    { seq: 16, type: 'turn/end' }
+  ]
+  seq = 16
+  await flushOutbound()
+
+  eq(sent.length, 1, 'run_code 里的 qq_send 失败了 → 自动转发兜底（不能把她的话吞掉）')
+}
+
+// 场景 3（同会话两回合）：第一回合用 qq_send，第二回合没用 ——
+// 第二回合的正文**必须**照常转发。
+// ⚠️ 这条钉的是「判定不许跨回合串味」：一旦有人把判定改成「这个会话见过 qq_send 就永远算」，
+//    第二回合就会被静默吞掉，用户看到的是「她突然不回话了」。
+{
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+
+  // 第一回合：调了 qq_send
+  enqueueOutbound('session-TWO', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'tool/call', data: { name: 'qq_send', callId: 's-1' } },
+    { seq: 13, type: 'tool/result', data: { message: { isError: false, toolCallId: 's-1' } } },
+    { seq: 14, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第一回合用工具发了' }] } } },
+    { seq: 15, type: 'turn/end' }
+  ]
+  seq = 15
+  await flushOutbound()
+  eq(sent.length, 0, '（第一回合）用过 qq_send → 不自动转发')
+
+  // 第二回合：没调 qq_send
+  enqueueOutbound('session-TWO', fakeAgent, 15, { kind: 'private', id: String(PEER) })
+  events = [
+    ...events,
+    { seq: 16, type: 'user/message' },
+    { seq: 17, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '第二回合只说话。' }] } } },
+    { seq: 18, type: 'turn/end' }
+  ]
+  seq = 18
+  await flushOutbound()
+
+  eq(sent.length, 1, '同会话第二回合没用 qq_send → 正文照常转发（判定不跨回合串味）')
+  eq(sent[0]?.params?.message?.[0]?.data?.text, '第二回合只说话。', '发出去的是第二回合的正文')
+}
+
+
+// ===========================================================================
+// 0.20.2：群聊默认不自动转发（autoForwardPrivate / autoForwardGroup）
+// ===========================================================================
+//
+// 用户的原话：「群里不要自动转发……默认仅私聊激活自动转发，群里默认关闭」。
+// 场景：群回合跑完、没调 qq_send（否则上面那条 sendCalls 分支先拦掉了，
+//       测不到渠道开关本身）→ 正文必须**留在本地**，一条都不发。
+console.log('\n渠道开关（0.20.2）：')
+{
+  const GROUP = '975663147'
+  const { getConfig } = await import('../lib/config.js')
+  const gcfg = getConfig()
+  const savedPrivate = gcfg.autoForwardPrivate
+  const savedGroup = gcfg.autoForwardGroup
+
+  // --- 群默认关：不发 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardGroup = false
+
+  enqueueOutbound('session-GRP', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '已确认 X，改了 Y，测试过了。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 0, '群里默认不自动转发：这段汇报不进群')
+  ok(outbound.size === 0, '群里这条也正常出队（不能卡在队头堵住后面的转发）')
+
+  // --- 群开关打开后又能发（证明不是「群这条路彻底坏了」）---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardGroup = true
+
+  enqueueOutbound('session-GRP2', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '在的，群里说话了。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '群里把开关打开后照常自动转发（开关真的生效，不是写死）')
+  eq(sent[0]?.action, 'send_group_msg', '走的仍然是群出口')
+
+  // --- 私聊不受影响（默认开）---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardPrivate = true
+
+  enqueueOutbound('session-PRV', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '私聊照常。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '私聊默认仍然自动转发（存量行为不变）')
+  eq(sent[0]?.action, 'send_private_msg', '走的是私聊出口')
+
+  // --- 私聊关掉后也不发 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardPrivate = false
+
+  enqueueOutbound('session-PRV2', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '私聊也不该发。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 0, '私聊开关关掉后也不自动转发')
+
+  gcfg.autoForwardPrivate = savedPrivate
+  gcfg.autoForwardGroup = savedGroup
+}
+
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed > 0 ? 1 : 0)

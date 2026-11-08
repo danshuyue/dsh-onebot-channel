@@ -1563,11 +1563,36 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话。**私聊**那行还有「前缀」；群聊没有 —— 群头由插件按发送者身份自动拼，见下方「三种前缀」。 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限（单次）、`waitTurnMaxMs` 单回合等待总量（0 = 不限）、`closureEnabled` 允许判断收尾、**`notifyTarget` 系统消息发到哪**（`same` 原路 / `private` 全回传私聊并带【群聊 …】前缀 / `off` 不回传）、`autoForwardReply` 自动转发、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限（单次）、`waitTurnMaxMs` 单回合等待总量（0 = 不限）、`closureEnabled` 允许判断收尾、**`notifyTarget` 系统消息发到哪**（`same` 原路 / `private` 全回传私聊并带【群聊 …】前缀 / `off` 不回传）、**`autoForwardPrivate` 私聊自动转发 / `autoForwardGroup` 群里自动转发（默认关）**、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
 | **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、**私聊**默认前缀、图片副本目录、语音产物目录（留空 = `~/.dsh/voice`，`off` 才关闭；目录外一律拒绝）、只在 @ 时响应、冷启动会话。 |
+
+#### 自动转发按渠道拆开（0.20.2）
+
+以前只有一个 `autoForwardReply`，私聊和群聊共用。结果是：**她在群里干完活，回合末尾
+写的那段「汇报」会被自动转发直接推进群里** —— 用户 2026-11-08 报的就是这个：
+
+```
+13:56:58 [out] 分 4 条发送，字数 22/107/30/61
+13:56:58 [out] 已转发回复 225 字 -> group
+```
+
+现在拆成两个键：
+
+| 键 | 默认 | 语义 |
+|---|---|---|
+| `autoForwardPrivate` | **true** | 私聊回合结束后，把最终回复自动发回去（存量行为不变） |
+| `autoForwardGroup` | **false** | 群里**默认不发**；要出声就显式 `qq_send` |
+
+> 旧键 `autoForwardReply` 会被 `migrateAutoForward` 一次性迁进 `autoForwardPrivate`
+> （只在用户显式设过 `autoForwardReply: false` 时记一笔日志），迁完即删 ——
+> 留着只会变成「改了没反应」的死配置，那是本仓库最经典的坑。
+
+⚠️ 群默认关**不影响故障通知**：`[系统] 出错了 / 中断了` 那类消息走 `notifyTurn`，
+排在渠道开关之前，照常发。别为了「群里安静」把这条路也堵掉 —— 那正是 0.19.5
+「不让人干等」要解决的问题。
 
 #### 三种「前缀」，别混（0.18.4 起界面里也写了）
 
