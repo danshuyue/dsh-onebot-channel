@@ -1742,7 +1742,10 @@ reply + at + text   ← 原样
   // ---- 群聊 ----
   "groupUins": [],                           // 监听哪些群；设置页绑群时自动同步
   "groupOnlyWhenAt": true,                   // 只在 @ 本号时投递
-  "groupContextCount": 5,                    // 被 @ 时带几条未读群消息
+  "groupContextCount": 5,                    // 单次 @ 时带几条未读群消息（软上限）
+  "groupContextMax": 20,                     // 一轮最多带几条（硬上限，含窗口续聊；超了丢最老的）
+  "windowQueueAll": true,                    // 窗口期内整段对话都进队列（关 = 只认触发人/@/引用）
+  "windowQueueMax": 20,                      // 攒批队列容量上限，超了丢最老的
   "groupPollMs": 3000,
 
   // ---- 路由表（核心）----
@@ -1965,12 +1968,12 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-52 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+53 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
-| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） |
+| 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） `diaglog.js`（诊断流水：投给模型的正文原文 + 工具调用，内存环形、进程重启即清） |
 | 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） `prompttext.js`（正文头模板：渲染 + 「必须含群友」的护栏） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `notice.js`（回合中断时替插件说一句带 `[系统]` 的话） `split.js`（分条） `title.js`（会话标题） `history.js`（历史检索实现保留，工具当前未注册） |
 | 能力与 UI | `tool.js`（13 个工具实现，按「工具箱」分档注册：默认注册 5 个、其余按档打开；工具实现还保留历史查询、说说与手动记忆代码但当前未注册） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：受限本机目录 → 协议端上传 → record 段） `tts.js`（文字→音频：本机 GPT-SoVITS 与 Breeze Blue 两条路，含全局串行队列） `tts-gate.js`（语音的三道闸：四档 / 对象名单 / 每日额度） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声 + 按四档渲染的语音段） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
