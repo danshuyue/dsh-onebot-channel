@@ -11,7 +11,7 @@ import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap,
+  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge, rollBetween,
   notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE, flushPersist,
   targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
@@ -228,93 +228,60 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   ok(entry !== null && entry.countToday === 1, '跨天计数：昨天 2 次不计入今天，今天从 1 开始')
 }
 
-// ---------------------------------------------------------------------------
-// 从上游 0.15.2 搬来的三处修复（0.16.18）
-// ---------------------------------------------------------------------------
-console.log('上游修复 · rollBetween 摇号：')
+// ---- 空闲基准：自己刚主动过，也要从「上次主动」重新等满 idleHours ----
+// 之前的 bug：基准只看 lastIncomingAt，主动说完它不动，于是 60 秒后下一 tick
+// 依然算「空闲够了」——静默一解除就一分钟一条，几分钟把当日额度烧光。
 {
-  const { rollBetween } = await import('../lib/proactive.js')
-  const a = rollBetween(2, 6, 12345)
-  const b = rollBetween(2, 6, 12345)
-  ok(a === b, `同一个 seed 摇出同一个值（${a}）`)
-  ok(a >= 2 && a < 6, `结果落在 [2,6) 内（${a}）`)
-  // 相邻时间戳必须摇出不同的值 —— 只做 FNV 的话小数部分会挤在一起
-  const near = [1, 2, 3, 4, 5].map((s) => rollBetween(2, 6, s))
-  ok(new Set(near.map((n) => n.toFixed(4))).size >= 4, `相邻 seed 摇出的值足够分散（${near.map((n) => n.toFixed(2)).join(', ')}）`)
-  ok(rollBetween(5, 3, 1) === 5, 'max <= min 时退回 min（配置写反不会崩）')
-  ok(rollBetween(2, 6, 'abc') >= 2, 'seed 是字符串也能用')
+  const r = shouldNudge({
+    ...base,
+    dailyMax: 6, // 别让配额先把它拦下，这条要验的是「空闲」那一道
+    entry: {
+      lastIncomingAt: NOW - 8 * HOUR,
+      lastProactiveAt: NOW - 60 * 1000,
+      unanswered: 0,
+      day: dayKey(NOW),
+      countToday: 1
+    }
+  })
+  ok(r.ok === false && r.reason === 'not-idle-enough', '刚主动过 1 分钟 → 空闲不够，不能再开口')
+  ok(r.eligibleAt === NOW - 60 * 1000 + 6 * HOUR, '起算点是「上次主动」，不是「上次来信」')
 }
 
-console.log('上游修复 · 空闲起算点（她刚说完不该立刻又能开口）：')
+// ---- 主动搭话的正文要带「现在几点」 ----
 {
-  const now = Date.now()
-  const base = {
-    enabled: true, idleHours: 6, dailyMax: 5,
-    // ⚠️ 想表达「不静默」不能用空串（2026-11-05 实测踩到）：
-    //   minutesOf('', fallback) 里空串**解析失败**，会回落到默认的 23:00–08:00，
-    //   于是「深夜跑测试」时这组用例被 quiet-hours 拦下，报一堆看起来像功能坏了的红。
-    //   这个测试原本就写在别的时段跑，看不出问题 —— 属于「时间依赖的假绿/假红」。
-    //   正确写法：from === to 才表示不静默（inQuietHours 的约定），用 '00:00','00:00'。
-    quietFrom: '00:00', quietTo: '00:00', backoffMax: 1, now
-  }
-  // 对方 8 小时前说过话（远超 6 小时门槛），但她**1 分钟前刚主动说过**
-  const entry = {
-    lastIncomingAt: now - 8 * 3600 * 1000,
-    lastProactiveAt: now - 60 * 1000,
-    day: null, countToday: 0, unanswered: 0
-  }
-  const r = shouldNudge({ ...base, entry })
-  // 旧实现只看 lastIncomingAt → 算作「已空闲 8 小时」→ 放行 → 一分钟一条把额度烧光
-  ok(r.ok === false, `她刚主动说完之后【不】立刻再开口（ok=${r.ok} reason=${r.reason}）`)
-  ok(r.reason === 'not-idle-enough' || r.reason === 'backoff', `拦下的理由说得清（${r.reason}）`)
-
-  // 反过来：她很久没主动、对方也很久没说话 → 应该放行
-  const quiet = { lastIncomingAt: now - 9 * 3600 * 1000, lastProactiveAt: now - 9 * 3600 * 1000, day: null, countToday: 0, unanswered: 0 }
-  ok(shouldNudge({ ...base, entry: quiet }).ok === true, '真的安静了 9 小时就正常放行（没拦过头）')
+  ok(formatClock(NOW).startsWith('2026-10-29 14:00'), '时刻格式：年月日 时:分（本地时区）')
+  ok(formatClock(NOW).endsWith('（周四）'), '时刻里带星期几')
+  const text = composeNudge('private:100', { lastIncomingAt: NOW - 7 * HOUR }, NOW)
+  ok(text.includes('现在是 2026-10-29 14:00'), '内部来信里写清了当前时间')
+  ok(text.includes('距上次说话已经 7 小时'), '仍然保留「距上次说话多久」')
+  ok(text.includes('qq_pass'), '仍然保留了「可以不说」的出口')
 }
 
-console.log('上游修复 · 摇号区间 idleMaxHours：')
+// ---- 空闲门槛随机区间（1.5~2 小时这类） ----
 {
-  const now = Date.now()
-  const base = {
-    enabled: true, idleHours: 2, idleMaxHours: 6, dailyMax: 5,
-    // 同上一组：空串会回落到默认 23:00–08:00，深夜跑必红。'00:00','00:00' 才是「不静默」。
-    quietFrom: '00:00', quietTo: '00:00', backoffMax: 1, now
-  }
-  // 同一个 anchor，多次调用应给出同一个 eligibleAt（不会每 60 秒变）
-  const entry = { lastIncomingAt: now - 3 * 3600 * 1000, lastProactiveAt: 0, day: null, countToday: 0, unanswered: 0 }
-  const r1 = shouldNudge({ ...base, entry })
-  const r2 = shouldNudge({ ...base, entry })
-  ok(r1.eligibleAt === r2.eligibleAt, '同一次安静期内门槛固定（不会每 60 秒重摇）')
-  // 门槛必须落在 [2h, 6h] 区间内
-  const gapHours = (r1.eligibleAt - entry.lastIncomingAt) / 3600000
-  ok(gapHours >= 2 - 0.01 && gapHours <= 6 + 0.01, `摇出的门槛在 [2,6] 小时内（${gapHours.toFixed(2)}h）`)
-  // idleMaxHours=0（默认）时退回固定值
-  const fixed = shouldNudge({ ...base, idleMaxHours: 0, entry })
-  ok(Math.abs((fixed.eligibleAt - entry.lastIncomingAt) / 3600000 - 2) < 0.01, 'idleMaxHours=0 时用固定门槛（不随机）')
-}
+  // 摇号本身的边界
+  const rolled = rollBetween(1.5, 2, NOW)
+  ok(rolled >= 1.5 && rolled < 2, '摇出来的值落在区间里')
+  ok(rollBetween(1.5, 2, NOW) === rolled, '同一个 seed 摇到同一个值（不会每 60 秒变门槛）')
+  ok(rollBetween(2, 1.5, NOW) === 2, '上限小于下限时退化成固定值')
+  const spread = new Set([0, 1, 2, 3, 4, 5].map((i) => rollBetween(1.5, 2, NOW + i * 3600 * 1000).toFixed(3)))
+  ok(spread.size >= 5, '相邻安静期能摇出不同的门槛（真的在随机）')
 
-console.log('上游修复 · formatClock 与主动提示基准：')
-{
-  const { composeNudge, formatClock } = await import('../lib/proactive.js')
-  const now = new Date('2026-11-03T14:05:00').getTime()
-  const text = formatClock(now)
-  ok(/^2026-11-03 14:05（周[一二三四五六日]）$/.test(text), `格式正确（${text}）`)
-  ok(text.includes('周'), '带星期几（周末和工作日说的话不一样）')
-  const entry = { lastIncomingAt: now - 8 * 3600000, lastProactiveAt: now - 3600000 }
-  const nudge = composeNudge('private:100', entry, now)
-  ok(nudge.includes('距上次互动已经 1 小时'), '主动提示与判定共享最近互动时间，不再用更早的来信时间')
-
-  // ---- 「沉默权」档被关掉时，文案不能还点名 qq_pass（2026-11-05 审计发现 E）----
-  // 关掉那一档后 qq_pass / qq_skip / qq_wait / qq_close 都不注册，
-  // 还写「就 qq_pass」= 教模型去调一个不存在的工具，它会拿到 UNKNOWN_TOOL 再换个写法试。
-  ok(nudge.includes('qq_pass'), '沉默权开着时，主动提示点名 qq_pass（最直接）')
-  const nudgeNoSilence = composeNudge('private:100', entry, now, { silence: false })
-  ok(!nudgeNoSilence.includes('qq_pass'), '★ 沉默权关掉时，主动提示不再点名 qq_pass')
-  ok(!nudgeNoSilence.includes('qq_skip'), '★ 沉默权关掉时，也不点名 qq_skip')
-  ok(nudgeNoSilence.includes('什么都不发'), '沉默权关掉时给了「什么都不发」这个替代出口')
-  ok(nudgeNoSilence.includes('不调用任何工具'), '并且说清了「不调工具 = 沉默」，否则模型会硬说一句')
-  ok(composeNudge('private:100', entry, now).includes('直接 qq_pass。）'), '不传 options 时文案与改动前一致（老调用方不受影响）')
+  // 判定里用它：门槛必须在 [min,max] 之间
+  const entry = { lastIncomingAt: NOW - 1.7 * HOUR, unanswered: 0, day: dayKey(NOW), countToday: 0 }
+  const r = shouldNudge({
+    ...base,
+    dailyMax: 6,
+    idleHours: 1.5,
+    idleMaxHours: 2,
+    entry
+  })
+  const waitHours = (r.eligibleAt - (NOW - 1.7 * HOUR)) / HOUR
+  ok(waitHours >= 1.5 && waitHours <= 2, `门槛落在区间内（实际 ${waitHours.toFixed(3)} 小时）`)
+  const again = shouldNudge({ ...base, dailyMax: 6, idleHours: 1.5, idleMaxHours: 2, entry })
+  ok(again.eligibleAt === r.eligibleAt, '同一段安静期里重复判定结果一致')
+  const fixed = shouldNudge({ ...base, dailyMax: 6, idleHours: 1.5, idleMaxHours: 0, entry })
+  ok(Math.abs(fixed.eligibleAt - (NOW - 1.7 * HOUR + 1.5 * HOUR)) < 1, '上限填 0 → 退回固定用下限')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
