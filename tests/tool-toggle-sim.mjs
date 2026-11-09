@@ -330,8 +330,46 @@ console.log('\n9. 设置页 / 配置项接线：')
   ok(!/约 2\.4 万|24000/.test(clientSrc), '设置页没有残留虚报的「2.4 万字符」常量')
 
   // 注册分支只在 index.js 里有一份真身 —— 这里确认它按 features 分了支
+  //
+  // ⚠️ 这一组断言在 2026-11-09 修过一次**假绿**（坑 29 的教科书形态）：
+  //    原来写的是 `indexSrc.includes('if (features.emoji)')` ——
+  //    只证明「这个字符串在文件里出现过」。而 index.js 里有**两处**
+  //    `if (features.emoji)`（qq_emoji_search 一处、收藏表情四件套一处），
+  //    变异脚本只改坏其中一处时，另一处照样满足断言 → **改坏了却仍然绿**。
+  //    这正是 tool-toggle-mutation 的变异 1 一直抓不到东西的原因。
+  //
+  //    修法：不看「有没有出现过」，而是把每个档的**工具调用**逐个点名，
+  //    并且要求每个调用都处在某个 features 分支之后（顺序比较）。
+  //    这样改坏任意一处都会让「该工具在分支之后」不成立。
+  // 每个表情包工具都必须出现在某个 **features.emoji 分支块内部**（而不是文件里随便哪处）
+  //
+  // ⚠️ 踩过两次，别再用「比较全局位置」这种写法：
+  //   ① 用 indexOf 取工具名 → 命中的是文件开头的 import 行（位置最靠前），恒假；
+  //   ② 改用 lastIndexOf 后仍被变异逃掉 —— 因为 index.js 里有**两处**
+  //      `if (features.emoji)`（qq_emoji_search 一处、收藏表情四件套一处），
+  //      变异只把**第一处**改成 `if (true)`，而工具调用在第二块里，
+  //      「工具位置 > 第一个分支位置」照样成立 → 改坏了却仍然绿。
+  //
+  //   正确判据：对**每个**工具，找到它所在的那个块，再确认**那个块的入口**是
+  //   `if (features.emoji)` 而不是 `if (true)`。做法：取工具调用位置之前
+  //   **最近一个** `if (` 开头的行为块入口，断言它包含 features.emoji。
+  //
+  //   ⚠️ 循环必须保证 cursor **严格变小**：第一版写成 `cursor = prevLineStart`，
+  //      而 `lastIndexOf('\n', cursor - 1) + 1` 在 cursor 已经是行首时返回同一个值
+  //      → cursor 不再前进 → **死循环**（表现为测试进程卡死、被外层超时杀掉，
+  //      看起来像「测试跑不完」，很容易误判成别的毛病）。
+  for (const tool of ['registerEmojiSearchTool', 'registerCollectTool', 'registerFacePreviewTool', 'registerFacePickTool', 'registerFaceRenameTool']) {
+    const at = indexSrc.lastIndexOf(tool)
+    // 从调用点往前逐行找最近的 `if (` 行 —— 那就是它所在块的入口
+    const lines = indexSrc.slice(0, at).split('\n')
+    let entry = ''
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (/^\s*if\s*\(/.test(lines[i])) { entry = lines[i].trim(); break }
+    }
+    ok(entry.includes('features.emoji'),
+      `index.js：${tool} 所在的块由 features.emoji 把守（实际入口：${entry || '没找到'}）`)
+  }
   ok(indexSrc.includes('if (features.silence)'), 'index.js：沉默权按开关注册')
-  ok(indexSrc.includes('if (features.emoji)'), 'index.js：表情包按开关注册')
   ok(indexSrc.includes('if (features.voiceIn)'), 'index.js：语音识别按开关注册')
   ok(indexSrc.includes('if (features.poke)'), 'index.js：戳一戳按开关注册')
   ok(indexSrc.includes('{ features }'), 'index.js：把 features 传给 registerSendTool')
