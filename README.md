@@ -1566,11 +1566,11 @@ reply + at + text   ← 原样
 |---|---|
 | **概览** | 连接状态 + 统计块（私聊/群绑定、今天主动几次、记住几个人、待合并条数、推送是否连通），以及「现在在跑什么」的自然语言摘要；数字都可点进对应分区 |
 | 绑定 | 私聊 / 群聊各自一行：QQ 号、名字、绑定会话。**私聊**那行还有「前缀」；群聊没有 —— 群头由插件按发送者身份自动拼，见下方「三种前缀」。 |
-| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限（单次）、`waitTurnMaxMs` 单回合等待总量（0 = 不限）、`closureEnabled` 允许判断收尾、**`notifyTarget` 系统消息发到哪**（`same` 原路 / `private` 全回传私聊并带【群聊 …】前缀 / `off` 不回传）、**`autoForwardPrivate` 私聊自动转发 / `autoForwardGroup` 群里自动转发（默认关）**、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
+| **对话节奏** | `replyQuietMs` 回复前静默、`mergeWindowMs` 合并窗口（+ 上限 / 条数）、`waitMaxMs` 等待上限（单次）、`waitTurnMaxMs` 单回合等待总量（0 = 不限）、`closureEnabled` 允许判断收尾、**`notifyTarget` 系统消息发到哪**（`same` 原路 / `private` 全回传私聊并带【群聊 …】前缀 / `off` 不回传）、**`autoForwardPrivate` 私聊自动转发 / `autoForwardGroup` 群里自动转发（默认关）/ `groupReportToPrivate` 群里的汇报回传私聊（默认关）**、`backfillOnStart` 上线补历史（+ 页数 / 投递条数）、`splitMode` **怎么分条**：按换行（她自己决定说几条）/ 按句末标点（一句一条）；群聊连续对话窗口：`windowEnabled`、`windowIdleMs`、`windowMaxReplies`、`windowPerPeerDaily`、`windowPerGroupDaily`、`windowMaxMs`，活动时段为 `waterWindows`；戳一戳：`pokeEnabled`、`pokeCooldownMs`。 |
 | **主动搭话** | 上卡：`proactiveEnabled` 开关、`proactiveIdleHours` 空闲门槛、`proactiveDailyMax` 日上限、静默时段、退避上限。下卡「对谁开口」：所有人 / 只对勾选的人 + 每人上次主动时间与「为什么现在还不说」 |
 | **关系记忆** | `memoryEnabled` 开关、记住了谁（称呼 / 事实条数 / 说过几句）、一键清空 |
 | **配置** | 两条连接链路同页：**HTTP API**（`onebotHttp` 地址 + `token`，留空 = 保持原样，自动发现读 `httpServers`）、**WebSocket 推送**（`wsEnabled`、WS 地址与 token，自动发现读 `wsServers`）。两套 token 相互独立，混用会 401 |
-| **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、**私聊**默认前缀、图片副本目录、语音产物目录（留空 = `~/.dsh/voice`，`off` 才关闭；目录外一律拒绝）、只在 @ 时响应、冷启动会话。 |
+| **高级** | 分条（字数 / 条数 / 碎片阈值 / 间隔）、轮询间隔、补漏间隔、**私聊**默认前缀、图片副本目录、语音产物目录（留空 = `~/.dsh/voice`，`off` 才关闭；目录外一律拒绝）、只在 @ 时响应、冷启动会话、**`groupCrowdHintCount` 群聊上下文过载提示阈值（默认 5，0 = 关）**。 |
 
 #### 自动转发按渠道拆开（0.20.2）
 
@@ -1588,6 +1588,39 @@ reply + at + text   ← 原样
 |---|---|---|
 | `autoForwardPrivate` | **true** | 私聊回合结束后，把最终回复自动发回去（存量行为不变） |
 | `autoForwardGroup` | **false** | 群里**默认不发**；要出声就显式 `qq_send` |
+
+> ⚠️ **0.21.4 修的一个洞**：`autoForwardGroup=false` 原本**拦不住 `qq_pass` 那条路**。
+> `qq_pass` 分支里有一条「正文写了真话就照发」，它直接 `continue` 结账，
+> 走不到下面那道渠道闸门 —— 于是群里明明关着，汇报照样进去了（实测 161 字、拆成 3 条）。
+> 现在渠道闸门提到了 `qq_pass` **之前**，群渠道一律只认显式 `qq_send`。
+> 那个「说出口了照发」的规矩**只对私聊保留**（一对一才成立）。
+
+#### 群里的汇报去哪（0.21.4）
+
+`groupReportToPrivate`（**默认 false**）：群里那些「本该进群、但群里不该看到」的正文
+（多数是写给你的汇报），关着时**直接丢弃**；打开后带 `【群聊 名】` 前缀发到**你的私聊**，
+群里仍然一片安静。
+
+为什么要有这个开关：修完上面那个洞之后那些正文会连你一起看不到 ——
+而你其实是**想看**的。但默认必须关：私聊里每条都是「她判断要不要开口」的元话语，
+高频长会话下会明显刷屏。
+
+#### 群聊上下文过载提示（0.21.4）
+
+`groupCrowdHintCount`（默认 **5**，0 = 关）：正文里〔这段时间的群聊〕实际列出的条数
+达到这个数时，附一句
+
+```
+（当前消息过多（N 条），请使用引用或者 @ 来明确你要回复的对象）
+```
+
+给的是**判断依据**，不是台词 —— 引用（`reply_to`）和 @（`at`）两条路本来就在工具里，
+缺的只是「现在这个场面该用了」这个提示。
+
+> ⚠️ 判据用的是**正文里实际列出来的行数**，不是日志里那个「这段时间还有 29 条」
+> （未读总量）。后者几乎每回合都会触发，直接变成噪音。
+> 另外判据是 **`>=`** 而不是 `>`：一次性 @ 那条路的上下文软上限恰好就是
+> `groupContextCount`（默认 5），写成「超过 5 条」就永远不成立，提示会静默变成死代码。
 
 > 旧键 `autoForwardReply` 会被 `migrateAutoForward` 一次性迁进 `autoForwardPrivate`
 > （只在用户显式设过 `autoForwardReply: false` 时记一笔日志），迁完即删 ——

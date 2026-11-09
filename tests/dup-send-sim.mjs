@@ -115,6 +115,15 @@ const fakeAgent = {
 }
 
 const { enqueueOutbound, outbound, flushOutbound } = await import('../lib/outbound.js')
+// ⚠️ 必须显式 loadConfig()（0.21.4 发现的测试债）：
+//    本文件从头到尾没调过它，于是 getConfig() 一直返回 DEFAULTS
+//    （peerUin/ownerUin 都是 0）。以前无所谓 —— 没有哪条断言需要真实的号；
+//    但 0.21.4 的「群汇报回传私聊」要靠 ownerUin/peerUin 定位收件人，
+//    不加载配置就永远取不到目标，回传静默失败（测试报「期望 1 实得 0」）。
+//    别再删掉这一行：它不是在「读一个无关紧要的默认值」，
+//    而是在把刚写进 CONFIG 的那份测试配置真正装进单例。
+const { loadConfig } = await import('../lib/config.js')
+loadConfig()
 
 console.log('连发消息 → 重复发送：')
 
@@ -452,6 +461,187 @@ console.log('\n渠道开关（0.20.2）：')
   eq(sent.length, 0, '私聊开关关掉后也不自动转发')
 
   gcfg.autoForwardPrivate = savedPrivate
+  gcfg.autoForwardGroup = savedGroup
+}
+
+// ===========================================================================
+// 0.21.4：qq_pass 绕过群渠道闸门（用户 2026-11-09 实测报的那个洞）
+// ===========================================================================
+//
+// ## 现场（真实日志，抓到的就是这个）
+//
+//   05:10:44 [rhythm] 已抑制自动转发 key=group:716197431（qq_pass: …不必再接）
+//   05:10:49 [out] qq_pass 但正文写了真话（161 字），按「说出口了」照发 key=group:716197431
+//   05:10:49 [out] 分 3 条发送，字数 14/107/36
+//   05:10:56 [out] 已转发回复 161 字 -> group
+//
+// 那 161 字是**写给他的汇报**（「这条我划过去了，没有回复。原因：小鲸鱼只是又甩了一遍
+// 那张『巨碗照』…」），当众念进了群，还拆成了三条。
+//
+// ## 根因（结构性，不是配置）
+//
+//   `qq_pass` 分支里有一条「正文写了真话就照发」，它直接 continue 结账，
+//   而渠道闸门 `autoForwardEnabledFor` 排在**它后面** —— 于是群渠道关闭**对它完全失效**。
+//   用户当时 `autoForwardGroup` 甚至是 true，所以即便把它关掉也拦不住。
+//
+// ## 修法
+//
+//   渠道闸门提前到 qq_pass **之前**；群渠道一律只认显式 qq_send。
+//   「说出口了照发」这条规矩**只对私聊保留**（一对一才成立）。
+//
+// ⚠️ 下面两条是**成对**的：第一条钉「群里不再发」，第二条钉「私聊那条决策一个字没改」。
+//    只写第一条的话，一个「把 qq_pass 整段删掉」的粗暴修法也能让它绿 —— 那会顺手
+//    破坏私聊里「她真说了话但用户没收到」那个既有决策。
+console.log('\nqq_pass 不许绕过渠道闸门（0.21.4）：')
+{
+  const GROUP = '975663147'
+  const { getConfig } = await import('../lib/config.js')
+  const { suppress, consumeSuppress } = await import('../lib/rhythm.js')
+  const gcfg = getConfig()
+  const savedPrivate = gcfg.autoForwardPrivate
+  const savedGroup = gcfg.autoForwardGroup
+
+  // --- 群里：qq_pass 之后正文仍然不许进群 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardGroup = false
+  // 复现现场：她调了 qq_pass，但回合正文里写了一整段「写给他的汇报」。
+  suppress(`group:${GROUP}`, '已收档，这只是收尾后的反应表情包，不必再接')
+
+  enqueueOutbound('session-GRP-PASS', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这条我划过去了，没有再回复。原因：对方只是又甩了一遍那张图。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 0, '群里 qq_pass 后写了汇报正文 → 依然一条都不进群（闸门提前到 qq_pass 之前）')
+  ok(outbound.size === 0, '这条也正常出队（不能卡在队头堵住后面的转发）')
+
+  // --- 同一个开关打开时，群里照常能发（证明拦的是渠道，不是把 qq_pass 弄坏了）---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardGroup = true
+  suppress(`group:${GROUP}`, '同上')
+
+  enqueueOutbound('session-GRP-PASS2', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '在的，群里说话。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '群里把开关打开后，qq_pass + 有正文仍然照发（开关真的生效）')
+
+  // --- 私聊：既有决策**一个字都没改**（「说出口了照发」）---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.autoForwardPrivate = true
+  suppress(`private:${PEER}`, '这次先不开口')
+
+  enqueueOutbound('session-PRV-PASS', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '我看了，这次先不说。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '私聊 qq_pass + 正文写了真话 → 照发（既有决策保留，不能被一刀切掉）')
+
+  // --- 私聊：纯动作时 qq_pass 仍然真按下不发 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  suppress(`private:${PEER}`, '这次先不开口')
+
+  enqueueOutbound('session-PRV-PASS2', fakeAgent, 10, { kind: 'private', id: String(PEER) })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '（尾巴摆了摆）' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 0, '私聊 qq_pass + 纯动作正文 → 真按下不发（没退回旧行为）')
+
+  // ⚠️ 清干净抑制标记：群渠道关闭时闸门在 qq_pass 之前 continue，
+  //    所以那条标记**没被消费**（这是修法的已知代价，靠 TTL 自然过期）。
+  //    不清的话它会飘到下一个场景去误伤 —— 那正是「测试有跨运行状态污染」那类假绿。
+  consumeSuppress(`group:${GROUP}`)
+  consumeSuppress(`private:${PEER}`)
+  gcfg.autoForwardPrivate = savedPrivate
+  gcfg.autoForwardGroup = savedGroup
+}
+
+// ===========================================================================
+// 0.21.4：群里的汇报回传到私聊（groupReportToPrivate，默认关）
+// ===========================================================================
+console.log('\ngroupReportToPrivate（0.21.4）：')
+{
+  const GROUP = '975663147'
+  const { getConfig } = await import('../lib/config.js')
+  const gcfg = getConfig()
+  const savedGroup = gcfg.autoForwardGroup
+  const savedRelay = gcfg.groupReportToPrivate
+  gcfg.autoForwardGroup = false
+
+  // --- 默认关：丢 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.groupReportToPrivate = false
+
+  enqueueOutbound('session-REL1', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这段汇报两个地方都不该去。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 0, '默认关：群里的汇报正文直接丢弃（不进群、也不发私聊）')
+
+  // --- 打开：走私聊出口，带【群聊 …】前缀 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  gcfg.groupReportToPrivate = true
+
+  enqueueOutbound('session-REL2', fakeAgent, 10, { kind: 'group', id: GROUP })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这条我划过去了，没有回复。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '打开后：汇报回传到私聊（发出去一条）')
+  eq(sent[0]?.action, 'send_private_msg', '走的是**私聊**出口，不是群出口')
+  eq(sent[0]?.params?.user_id, PEER, '发给了私聊对象（ownerUin/peerUin）')
+  ok(String(sent[0]?.params?.message?.[0]?.data?.text ?? '').includes('【群聊'),
+    '正文带【群聊 …】前缀（和他一眼看出这是哪个群的事）')
+  ok(String(sent[0]?.params?.message?.[0]?.data?.text ?? '').includes('这条我划过去了'),
+    '回传的是正文本身')
+
+  gcfg.groupReportToPrivate = savedRelay
   gcfg.autoForwardGroup = savedGroup
 }
 
