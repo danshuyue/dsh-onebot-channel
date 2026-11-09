@@ -63,7 +63,10 @@ writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
   wsEnabled: false,
   backfillOnStart: false,
   proactiveEnabled: false,
-  windowEnabled: true
+  windowEnabled: true,
+  // 全天可开窗：默认 waterWindows 只有 12-14 / 18-09，白天别的时段跑测试会
+  // 「窗口已开」失败（环境依赖，不是代码坏了）。
+  waterWindows: ['00:00-23:59']
 }, null, 2), 'utf8')
 writeFileSync(join(SANDBOX_DATA, 'qq-bridge-state.json'), JSON.stringify({
   privates: {}, groups: {}, windows: {}
@@ -82,6 +85,9 @@ globalThis.fetch = async (_url, options) => {
   return { ok: true, json: async () => ({ status: 'ok', retcode: 0, data }) }
 }
 
+// ⚠️ 必须显式 loadConfig()：window.js 读 getConfig()，不加载就一直是 DEFAULTS。
+const { loadConfig } = await import(pathToFileURL(join(PLUGIN, 'lib', 'config.js')).href)
+loadConfig()
 const windowMod = await import(pathToFileURL(join(PLUGIN, 'lib', 'window.js')).href)
 const { openWindow, windowOf, isWindowEligible, closeWindow } = windowMod
 

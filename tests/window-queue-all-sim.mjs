@@ -58,12 +58,23 @@ writeFileSync(join(SANDBOX_DATA, 'qq-bridge.config.json'), JSON.stringify({
   splitReply: true,
   windowEnabled: true,
   windowQueueAll: true,
-  windowQueueMax: 20
+  windowQueueMax: 20,
+  // 全天可开窗（2026-11-09 补，本文件第二个红因）：
+  // 默认 waterWindows 是 ['12:00-14:00','18:00-09:00']，别的时段跑测试时
+  // `openWindow` 会因「outside active hours」静默返回 false，
+  // 现象就是第一条断言「窗口已开」直接红 —— 那**不是**窗口逻辑坏了。
+  waterWindows: ['00:00-23:59']
 }, null, 2), 'utf8')
 writeFileSync(join(SANDBOX_DATA, 'qq-bridge-state.json'), JSON.stringify({
   privates: {}, groups: {}, windows: {}
 }, null, 2), 'utf8')
 
+// ⚠️ 必须显式 loadConfig()（2026-11-09 补，本文件第一个红因）：
+//    window.js / state.js 都读 getConfig()，不加载就一直是 DEFAULTS ——
+//    groupUins 是 []（state.js 会把不在白名单里的窗口**静默丢弃**），
+//    waterWindows 走默认时段。两个原因叠在一起，现象都是「窗口已开」失败。
+const { loadConfig } = await import(pathToFileURL(join(PLUGIN, 'lib', 'config.js')).href)
+loadConfig()
 const windowMod = await import(pathToFileURL(join(PLUGIN, 'lib', 'window.js')).href)
 const {
   shouldQueueForWindow, isWindowEligible, openWindow, windowOf, closeWindow,
