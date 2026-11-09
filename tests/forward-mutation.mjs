@@ -62,13 +62,13 @@ const MUTATIONS = [
   },
   {
     name: '渲染永远走占位（等于没展开）',
-    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards)}`',
+    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards, imageLabel)}`',
     to: "      return '[转发消息]'"
   },
   {
     name: '嵌套深度算两次（内层永远超限）',
-    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards)}`',
-    to: '      return `\\n${renderForward(hit.messages, depth + 1, c, ind, forwards)}`'
+    from: '      return `\\n${renderForward(hit.messages, depth, c, ind, forwards, imageLabel)}`',
+    to: '      return `\\n${renderForward(hit.messages, depth + 1, c, ind, forwards, imageLabel)}`'
   },
   {
     name: '不递归预取（内层取不到）',
@@ -104,7 +104,7 @@ const MUTATIONS = [
     // 审核发现的退化：renderSegments 自己复制一套段渲染、漏掉 face/mface，
     // 会让「一批里有卡片」时整批表情退化。这条变异模拟「自己写 switch」。
     name: '段渲染不走公共函数（表情退化）',
-    from: '      if (segment?.type !== \'forward\') return segmentToText(segment)',
+    from: '      if (segment?.type !== \'forward\') return segmentToText(segment, imageLabel)',
     to: '      if (segment?.type !== \'forward\') return String(segment?.data?.text ?? (segment?.type === \'text\' ? \'\' : `[${segment?.type}]`))'
   },
   {
@@ -122,8 +122,8 @@ const MUTATIONS = [
   {
     // 审核指出：不正的 getter 能让渲染抛错，同样会丢消息。
     name: '渲染不兜畸形数据',
-    from: '  try {\n    body = renderSegments(item?.message, depth + 1, config, indent, forwards)\n  } catch (error) {',
-    to: '  if (true) {\n    body = renderSegments(item?.message, depth + 1, config, indent, forwards)\n  }\n  if (false) {'
+    from: '  try {\n    body = renderSegments(item?.message, depth + 1, config, indent, forwards, imageLabel)\n  } catch (error) {',
+    to: '  if (true) {\n    body = renderSegments(item?.message, depth + 1, config, indent, forwards, imageLabel)\n  }\n  if (false) {'
   },
   {
     // 审核指出：抓取不受渲染上限约束，depth 大时请求数失控会拖停投递链。
@@ -154,22 +154,22 @@ const MUTATIONS = [
     // 这条变异针对 poll.js —— 把私信那处调用删掉，forward-image-sim 必须变红。
     name: '私信路径不交卡片图（图片全是占位）',
     file: 'poll.js',
-    from: '  const forwardImages = await buildForwardImageBlocks(ctx, messages, forwards)',
+    from: '  const forwardImages = await buildForwardImageBlocks(ctx, messages, forwards, imageTracker, forwardOrder)',
     to: '  const forwardImages = []'
   },
   {
     // 审核发现的第三条路：窗口批次有 batchForwards 却没交卡片图。
     name: '窗口批次不交卡片图（第三条路漏了）',
     file: 'poll.js',
-    from: '  const forwardImages = await buildForwardImageBlocks(ctx, list, batchForwards)',
+    from: '  const forwardImages = await buildForwardImageBlocks(ctx, list, batchForwards, imageTracker, forwardOrder)',
     to: '  const forwardImages = []'
   },
   {
     // 审核发现：卡片图会污染「最近收到的图片」索引，qq_collect_face 会取到陌生人的图。
     name: '卡片图污染「最近收到的图片」索引',
     file: 'poll.js',
-    from: '    }], { remember: false })',
-    to: '    }])'
+    from: '    }], { remember: false, tracker })',
+    to: '    }], { tracker })'
   },
   {
     // 审核发现：预算闸放错粒度 —— 一张卡几十张图挤在一次调用里串行下，死线失效。

@@ -261,7 +261,9 @@ console.log('\nF. 卡片图不该进「最近收到的图片」索引（会污�
   ok(/if \(remember\) rememberImage\(/.test(imagesSrc), 'saveImageCopy 会按 remember 决定是否记索引')
   ok(/options\?\.remember !== false/.test(imagesSrc), 'buildImageBlocks 把 remember 透传给 saveImageCopy')
   const pollSrc = readFileSync(join(PLUGIN, 'lib', 'poll.js'), 'utf8')
-  ok(/\{ remember: false \}/.test(pollSrc), '卡片图那条路径显式传了 remember:false')
+  // 2026-11-09：这条调用还多传了 tracker（给正文里的 [图片N] 编号用），
+  // 所以匹配到 `remember: false` 之后允许跟别的键，不能要求它是最后一个键。
+  ok(/\{ remember: false[\s,}]/.test(pollSrc), '卡片图那条路径显式传了 remember:false')
 }
 
 console.log('\nH. 预算真的能中断下载（行为测试，不只静态检查）：')
