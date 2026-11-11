@@ -140,8 +140,14 @@ console.log('\n5. 每个 ARRAY_FIELDS 都登记了清洗器（新增字段忘了
     .filter((line) => !line.trim().startsWith('//'))
     .join('\n')
   const fields = [...noComments.matchAll(/'([A-Za-z][A-Za-z0-9]*)'/g)].map((m) => m[1])
-  eq(fields, ['proactiveTargets', 'waterWindows', 'voiceTargetsPrivate', 'voiceTargetsGroup'],
-    'ARRAY_FIELDS 解析出预期的 4 个字段（精确比对，防止解析退化成假绿）')
+  // ⚠️ 这是**精确清单**，加新的数组字段时必须同步改这里 —— 那正是它的用处：
+  //    它防的是「解析退化成假绿」（正则写坏了、一个字段都抽不到，后面全变成空断言）。
+  //    0.20.1 加了 ignoreCommands（忽略指令表）。
+  //    0.23.0 加了 wakeWords（唤醒词表）与 interestPoints（兴趣点，**对象数组** ——
+  //    它是这张表里第一个非字符串元素，所以下面还有一条专门验它的清洗器）。
+  eq(fields, ['proactiveTargets', 'waterWindows', 'voiceTargetsPrivate', 'voiceTargetsGroup', 'ignoreCommands',
+    'wakeWords', 'interestPoints'],
+    'ARRAY_FIELDS 解析出预期的 7 个字段（精确比对，防止解析退化成假绿）')
 
   const cAt = apiSrc.indexOf('const ARRAY_CLEANERS = {')
   const cleanersBlock = apiSrc.slice(cAt, apiSrc.indexOf('\n}', cAt))

@@ -80,7 +80,7 @@ const fakeAgent = {
         },
         {
           type: 'assistant/message', seq: 13,
-          data: { message: { role: 'assistant', content: [{ type: 'text', text: '这句是给树树看的，不该发到群里' }] } }
+          data: { message: { role: 'assistant', content: [{ type: 'text', text: '这句是给用户看的，不该发到群里' }] } }
         },
         { type: 'turn/end', seq: 14, data: { reason: { kind: 'completed' } } }
       ]

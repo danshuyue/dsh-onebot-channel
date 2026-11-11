@@ -1,7 +1,7 @@
 {
   "name": "dsh-onebot-channel",
-  "version": "0.15.2",
-  "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，提供 qq_send 等工具回发消息、发表情、收藏表情包、查表情目录与消息历史、发表 QQ 空间说说。",
+  "version": "0.24.1",
+  "description": "把 QQ 私聊与群聊经 OneBot 11 协议接进 DeepSeek Harness：WebSocket 事件推送入站，agent.followup 唤醒会话，通过已注册工具回发消息、发表情、语音转写与发送语音；群聊支持唤醒词（提到即相当于 @）与兴趣点（关键词触发后等一段时间，由模型判断是否为主人关心的事；可选择私聊提醒或在命中时由群绑定会话直接回应）。",
   "keywords": [
     "dsh-plugin",
     "deepseek",
@@ -34,7 +34,14 @@
     "cordis.patch.yml",
     "icon.svg",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "!docs/qq-bridge-config*",
+    "!docs/qq-bridge-diag-*",
+    "!docs/qq-bridge-load.log",
+    "!docs/*.log",
+    "!docs/维护索引.md",
+    "!docs/会话设定-设计稿.md",
+    "!docs/水群潜水-设计稿.md"
   ],
   "dsh": {
     "manifestVersion": 1,
@@ -50,9 +57,10 @@
     "test": "node tests/run-isolated.mjs",
     "test:progress": "node tests/run-isolated.mjs tests/progress-sim.mjs",
     "test:progress-mutation": "node tests/run-isolated.mjs tests/progress-mutation.mjs",
-    "test:raw": "node tests/readme-sim.mjs && node tests/assert.mjs && node tests/deliver-mode-sim.mjs && node tests/tool-retry-sim.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/window-sim.mjs && node tests/window-batch-sim.mjs && node tests/forward-sim.mjs && node tests/forward-image-sim.mjs && node tests/forward-mutation.mjs && node tests/voice-sim.mjs && node tests/voice-mutation.mjs && node tests/voiceout-sim.mjs && node tests/voiceout-mutation.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs && node tests/archive-image-sim.mjs && node tests/reply-sim.mjs && node tests/at-sim.mjs && node tests/http-config-sim.mjs && node tests/collect-sim.mjs && node tests/face-pick-sim.mjs && node tests/close-refuse-sim.mjs && node tests/preview-sim.mjs && node tests/poke-sim.mjs && node tests/notice-sim.mjs && node tests/turn-notice-sim.mjs && node tests/prompt-section-sim.mjs && node tests/tool-toggle-sim.mjs && node tests/tool-toggle-mutation.mjs && node tests/prompt-template-sim.mjs && node tests/state-latency-sim.mjs && node tests/session-title-sim.mjs && node tests/apply-gate-sim.mjs && node tests/workspace-picker-sim.mjs && node tests/workspace-picker-mutation.mjs && node tests/sensitive-breeze-sim.mjs && node tests/tts-breeze-sim.mjs && node tests/tts-queue-sim.mjs && node tests/tts-mode-sim.mjs && node tests/tts-quota-sim.mjs && node tests/split-delay-sim.mjs && node tests/voice-fail-sim.mjs && node tests/save-fields-sim.mjs",
+    "test:raw": "node tests/readme-sim.mjs && node tests/assert.mjs && node tests/deliver-mode-sim.mjs && node tests/tool-retry-sim.mjs && node tests/ws-sim.mjs && node tests/rhythm-sim.mjs && node tests/memory-sim.mjs && node tests/segments-sim.mjs && node tests/merge-sim.mjs && node tests/proactive-sim.mjs && node tests/window-sim.mjs && node tests/window-batch-sim.mjs && node tests/forward-sim.mjs && node tests/forward-image-sim.mjs && node tests/forward-mutation.mjs && node tests/image-label-sim.mjs && node tests/image-label-mutation.mjs && node tests/voice-sim.mjs && node tests/voice-mutation.mjs && node tests/voiceout-sim.mjs && node tests/voiceout-mutation.mjs && node tests/ui-wiring.mjs && node tests/client-render.mjs && node tests/outbound-tool-sim.mjs && node tests/pass-forward-sim.mjs && node tests/group-sim.mjs && node tests/identity-sim.mjs && node tests/archive-image-sim.mjs && node tests/reply-sim.mjs && node tests/at-sim.mjs && node tests/http-config-sim.mjs && node tests/collect-sim.mjs && node tests/face-pick-sim.mjs && node tests/close-refuse-sim.mjs && node tests/preview-sim.mjs && node tests/poke-sim.mjs && node tests/notice-sim.mjs && node tests/turn-notice-sim.mjs && node tests/prompt-section-sim.mjs && node tests/tool-toggle-sim.mjs && node tests/tool-toggle-mutation.mjs && node tests/prompt-template-sim.mjs && node tests/state-latency-sim.mjs && node tests/session-title-sim.mjs && node tests/apply-gate-sim.mjs && node tests/workspace-picker-sim.mjs && node tests/workspace-picker-mutation.mjs && node tests/sensitive-breeze-sim.mjs && node tests/tts-breeze-sim.mjs && node tests/tts-queue-sim.mjs && node tests/tts-mode-sim.mjs && node tests/tts-quota-sim.mjs && node tests/split-delay-sim.mjs && node tests/voice-fail-sim.mjs && node tests/save-fields-sim.mjs && node tests/send-throttle-sim.mjs && node tests/log-export-sim.mjs && node tests/log-coalesce-sim.mjs && node tests/voice-autosave-sim.mjs && node tests/balance-timeout-sim.mjs && node tests/target-scope-sim.mjs && node tests/notice-route-sim.mjs && node tests/wait-anchor-sim.mjs && node tests/notice-wait-mutation.mjs && node tests/autoforward-migrate-sim.mjs && node tests/autoforward-mutation.mjs && node tests/ignore-command-sim.mjs && node tests/window-queue-all-sim.mjs && node tests/window-queue-all-mutation.mjs && node tests/group-self-context-sim.mjs && node tests/group-self-context-mutation.mjs && node tests/diaglog-sim.mjs && node tests/diaglog-mutation.mjs && node tests/self-reply-eligible-sim.mjs && node tests/self-reply-eligible-mutation.mjs && node tests/group-context-sim.mjs && node tests/crowd-hint-sim.mjs && node tests/crowd-hint-mutation.mjs && node tests/report-relay-mutation.mjs && node tests/window-batch-render-sim.mjs && node tests/window-batch-render-mutation.mjs && node tests/wake-sim.mjs && node tests/wake-mutation.mjs && node tests/interest-judge-sim.mjs && node tests/interest-window-sim.mjs && node tests/interest-dedupe-sim.mjs && node tests/interest-wiring-sim.mjs && node tests/interest-mutation.mjs",
     "test:forward-card": "node tests/forward-sim.mjs && node tests/forward-mutation.mjs",
-    "test:legacy": "node tests/group-context-sim.mjs; node tests/identity-sim.mjs; node tests/capability-sim.mjs; node tests/outbound-sim.mjs",
+    "test:image-label": "node tests/image-label-sim.mjs && node tests/image-label-mutation.mjs",
+    "test:legacy": "node tests/identity-sim.mjs; node tests/capability-sim.mjs; node tests/outbound-sim.mjs",
     "test:rhythm": "node tests/rhythm-sim.mjs",
     "test:memory": "node tests/memory-sim.mjs",
     "test:segments": "node tests/segments-sim.mjs",

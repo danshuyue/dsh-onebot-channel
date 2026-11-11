@@ -50,7 +50,14 @@ const MUTATIONS = [
     // ⚠️ 但 sim 的 boot() 复刻的是分支逻辑，不 import index.js ——
     //   所以这条变异在 sim 里抓不到（见下面「已知局限」一节）。
     //   真正抓住它的是第 9 节的静态断言。
-    expectRed: 'index.js：表情包按开关注册'
+    // ⚠️ 2026-11-09：那条静态断言原来是 `indexSrc.includes('if (features.emoji)')`
+    //   —— 只证明字符串出现过，而文件里有**两处**该分支，改坏一处照样绿（假绿）。
+    //   已改成「每个工具所在块的入口必须是 features.emoji」，标签也变了。
+    //   ⚠️ expectRed 必须和「✗ 」之后**紧跟**的文本对齐：判定用的是
+    //      `output.includes('✗ ' + expectRed)`，所以标签中间不能跳过工具名。
+    //      实际标签是 `index.js：registerEmojiSearchTool 所在的块由 features.emoji 把守（…）`，
+    //      这里取一个**跨所有工具都成立**的公共片段。
+    expectRed: '所在的块由 features.emoji 把守'
   },
   {
     // ② 描述不动态化：把 feature 判断去掉，表情段永远出现
@@ -236,7 +243,15 @@ try {
     const result = runSim(dir)
     if (!result.ok) {
       // 变红了 —— 但必须确认是**因为预期的那条断言**红的
-      const hit = result.output.includes(`✗ ${m.expectRed}`)
+      //
+      // ⚠️ 判据：expectRed 必须出现在**某一条 ✗ 行里**，而不是要求
+      //    `✗ ` 之后紧跟它。原因：有些标签中间夹着变量（工具名、配置键名），
+      //    比如 `✗ index.js：registerEmojiSearchTool 所在的块由 … 把守`——
+      //    期望片段从「所在」开始就永远对不上 `✗ 所在的…`。
+      //    第一版是 `includes('✗ ' + expectRed)`，于是变异明明红了却被判「没命中」，
+      //    而那条变异本身是**有效的**（手工改坏同一个位置，sim 确实红在预期那条）。
+      const redLines = result.output.split(/\r?\n/).filter((l) => l.includes('✗'))
+      const hit = redLines.some((l) => l.includes(m.expectRed))
       if (hit) {
         pass += 1
         console.log(`  ✓ ${m.name} → 变红，且命中「${m.expectRed}」`)

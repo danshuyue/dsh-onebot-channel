@@ -81,7 +81,10 @@ const publicKeys = [...publicBlock.matchAll(/^ {4}([A-Za-z][A-Za-z0-9]*):/gm)].m
  */
 const DERIVED_PUBLIC = {
   // 凭据只回「配没配」，key 本身绝不回传。前端拿它决定输入框的 placeholder。
-  voiceBreezeKeySet: '派生自 voiceBreezeKey，只表示「配了没」，不回传 key 本身'
+  voiceBreezeKeySet: '派生自 voiceBreezeKey，只表示「配了没」，不回传 key 本身',
+  // 0.23.0：判定模型实际会用哪个。派生自 interestJudge{Provider,Model} + agentOptions，
+  // 界面要显示「继承时是什么」，但不该让前端自己推一遍那条回落规则（两处实现迟早不一致）。
+  interestJudgeEffective: '派生自 interestJudgeProvider/Model，空值时回落 agentOptions'
 }
 const orphanPublic = publicKeys
   .filter((k) => !(k in DERIVED_PUBLIC))
@@ -152,7 +155,36 @@ ok(!groupBranch.includes('setPrefixOf'), '群聊分支不再写 route.prefix')
 // 「高级」那张卡：三样叫「前缀」的东西要区分开
 ok(clientSrc.includes('这一页有两个「前缀」'), '高级页解释了私聊默认前缀与绑定表前缀的区别')
 ok(clientSrc.includes('第三样东西'), '高级页指出「命令前缀」是另一回事，别混')
-const tunablesBlock = clientSrc.slice(clientSrc.indexOf('setTunables({'), clientSrc.indexOf('})', clientSrc.indexOf('setTunables({')))
+/**
+ * 取 `setTunables({ ... })` 那一整个调用的源码。
+ *
+ * ⚠️ 原来写的是「从 `setTunables({` 切到它之后第一个 `})`」。
+ *    0.23.0 给 `interestPoints` 加了一个 `.map(function (row) { ... })` 之后，
+ *    那个内层调用的收尾 `})` 就把切片**提前截断**了 ——
+ *    于是排在它后面的十几个新键全被判成「没进表单状态」（假红）。
+ *
+ * 这个假红的形态很值得记：**切片锚点撞上了新代码里的同形 token**。
+ * 修法不是放宽断言（那是把看守拆掉），而是换一个真正稳的判据：
+ * 从 `{` 起按**花括号深度**数到回 0，那就是这个对象字面量的结尾。
+ * 它仍然是同一个方向的看守（「这些键到底在不在这个调用里」），只是不再脆弱。
+ */
+function tunablesCallSource(source) {
+  const start = source.indexOf('setTunables({')
+  if (start < 0) return ''
+  let depth = 0
+  let seenOpen = false
+  for (let i = start; i < source.length; i += 1) {
+    const ch = source[i]
+    if (ch === '{') { depth += 1; seenOpen = true; continue }
+    if (ch === '}') {
+      depth -= 1
+      if (seenOpen && depth === 0) return source.slice(start, i + 1)
+    }
+  }
+  return source.slice(start)
+}
+const tunablesBlock = tunablesCallSource(clientSrc)
+ok(tunablesBlock.length > 200, '能按花括号深度定位 setTunables 那一整个调用')
 const notLoaded = writable.filter((k) => !new RegExp(`\\b${k}:`).test(tunablesBlock))
 ok(notLoaded.length === 0, `可写字段都进了设置页的表单状态${notLoaded.length ? '，缺：' + notLoaded.join(', ') : ''}`)
 
@@ -164,6 +196,9 @@ ok(notRendered.length === 0, `可写字段都渲染出了控件${notRendered.len
 // ---- 7. 刻意不给控件的字段：必须写在白名单里，别静默漏掉 --------------------
 const DELIBERATE = {
   routes: '路由表由绑定表格接管',
+  // 0.20.0：被 notifyTarget（三选一）取代，loadConfig 负责把旧值迁进去。
+  // 再给它一个控件就是「一个行为两个真相源」—— 界面选「原路」、开关是关的，到底听谁的？
+  notifyTurnFailures: '已被 notifyTarget 三选一取代（存量 false 会被迁成 off）',
   token: '凭据，前端不回显也不该可写',
   selfUin: '登录后由 OneBot 报回',
   peerUin: '私聊对象，由路由表取代',
