@@ -23,7 +23,7 @@
  *      但保持一致 —— 以后有人把它改成集成测试就不用改这里。）
  * ⚠️ 子进程输出走**文件重定向**而不是管道：受限环境下管道会 EPERM。
  */
-import { mkdirSync, readFileSync, writeFileSync, rmSync, cpSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -59,17 +59,37 @@ function sandbox(tag) {
   return { work, home, plugin }
 }
 
+/**
+ * 跑一次测试，返回 { status, output }。
+ *
+ * ⚠️ **必须把 stdio 重定向到文件，不能用默认管道**（2026-11-11 实测）。
+ *    本机的 DSH 沙箱里，子进程管道会直接 EPERM：
+ *      `spawnSync(..., {encoding:'utf8'})` → `status=null, stdout=undefined, error=EPERM`
+ *    现象是「baseline 就红了 + 一条 ✗ 都没有 + 输出空白」，看着像被测代码坏了，
+ *    其实**一个字节都没读到**（维护索引 §4 坑 28 的典型形态）。
+ *
+ *    这个脚本一直用管道，所以它在本机从来没真正跑通过 —— 只是以前没被纳入
+ *    `npm test` 链，没暴露出来。0.23.0 把它接进测试链之后立刻现形。
+ */
 function runIn({ work, home, plugin }) {
   const log = join(work, 'out.txt')
-  const result = spawnSync(process.execPath, [TEST], {
-    cwd: plugin,
-    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
-    encoding: 'utf8',
-    timeout: 120000
-  })
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
-  try { writeFileSync(log, output, 'utf8') } catch { /* 尽力 */ }
-  return { status: result.status, output }
+  let fd
+  let status = null
+  try {
+    fd = openSync(log, 'w')
+    const result = spawnSync(process.execPath, [TEST], {
+      cwd: plugin,
+      env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
+      stdio: ['ignore', fd, fd],
+      timeout: 120000
+    })
+    status = result.status
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
+  }
+  let output = ''
+  try { output = readFileSync(log, 'utf8') } catch { output = '' }
+  return { status, output }
 }
 
 function runMutation({ name, edits, expectRed }) {

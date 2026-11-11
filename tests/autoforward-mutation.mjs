@@ -23,7 +23,7 @@
  * ⚠️ 每个变异用**独立 HOME**：否则前一个变异残留的配置会污染后一个。
  * ⚠️ 子进程输出走**文件重定向**而不是管道：受限环境下管道会 EPERM。
  */
-import { mkdirSync, readFileSync, writeFileSync, rmSync, cpSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, rmSync, cpSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -72,14 +72,35 @@ function sandbox(tag) {
   return { work, home, plugin }
 }
 
+/**
+ * 跑一次测试，返回 { status, output }。
+ *
+ * ⚠️ **stdio 必须重定向到文件**（2026-11-11 实测，坑 28）。
+ *    本机 DSH 沙箱里子进程管道会 EPERM：`spawnSync(..., {encoding:'utf8'})`
+ *    得到 `status=null, stdout=undefined, error=EPERM` ——
+ *    现象是「baseline 就红 + 一条 ✗ 都没有 + 输出空白」，
+ *    看着像被测代码坏了，其实一个字节都没读到。
+ *    这个脚本原来用管道，所以在本机从来没真跑通过（以前不在 npm test 链里）。
+ */
 function runIn({ work, home, plugin }, test) {
-  const result = spawnSync(process.execPath, [join(plugin, 'tests', test)], {
-    cwd: plugin,
-    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
-    encoding: 'utf8',
-    timeout: 180000
-  })
-  return { status: result.status, output: `${result.stdout ?? ''}${result.stderr ?? ''}` }
+  const log = join(work, 'out.txt')
+  let fd
+  let status = null
+  try {
+    fd = openSync(log, 'w')
+    const result = spawnSync(process.execPath, [join(plugin, 'tests', test)], {
+      cwd: plugin,
+      env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
+      stdio: ['ignore', fd, fd],
+      timeout: 180000
+    })
+    status = result.status
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
+  }
+  let output = ''
+  try { output = readFileSync(log, 'utf8') } catch { output = '' }
+  return { status, output }
 }
 
 function runMutation({ name, edits, test, expectRed }) {

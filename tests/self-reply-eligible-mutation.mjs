@@ -8,9 +8,15 @@
  * 如果还原成旧代码后测试**照样绿**，说明我这个「根因」判断是错的 ——
  * 那就得重新找原因，而不是急着交付。
  * （这个教训本项目踩过：2026-11-08 的 0.20.2 就是「账本白加」的那次。）
+ *
+ * ⚠️ **变异必须在副本里做，不能原地改真实源码**（2026-11-11，0.23.0 接进测试链时现形）：
+ *    DSH 沙箱把工作区源码设成只读 → 原地 `writeFileSync` 直接 EPERM，
+ *    变异全部报「变异构造失败」，看起来像功能坏了，其实是**改不动文件**。
+ *    更糟的是：原地改 + 跑完还原这套在崩溃/被 kill 时会留下被改坏的源码。
+ *    所以先 `cpSync` 一份插件到临时目录，在副本里变异、跑副本里的测试。
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -27,31 +33,42 @@ function pickTmp() {
 }
 const TMP = pickTmp()
 
-function mutate(file, from, to) {
+/** 复制一份插件（只复制跑测试需要的部分），变异在副本里做。 */
+function makeCopy(tag) {
+  const dir = join(TMP, `copy-${tag}-${process.pid}`)
+  cpSync(PLUGIN, dir, {
+    recursive: true,
+    filter: (src) => !src.includes('node_modules') && !src.includes('.git') && !src.includes('.tmp-test')
+      && !src.includes('.tmp-mutation') && !src.includes('_tmp-')
+  })
+  return dir
+}
+
+function mutate(copyDir, rel, from, to) {
+  const file = join(copyDir, rel)
   const source = readFileSync(file, 'utf8')
-  if (!source.includes(from)) throw new Error(`变异没命中：${file}\n---\n${from}\n---`)
+  if (!source.includes(from)) throw new Error(`变异没命中：${rel}\n---\n${from}\n---`)
   writeFileSync(file, source.replace(from, to), 'utf8')
-  return () => writeFileSync(file, source, 'utf8')
 }
 
-function run(logFile) {
-  const fd = openSync(logFile, 'w')
+function run(copyDir, logFile) {
+  let fd
+  let ok = false
   try {
-    execFileSync(process.execPath, [TEST], {
-      cwd: PLUGIN, stdio: ['ignore', fd, fd], timeout: 120000, env: { ...process.env }
+    fd = openSync(logFile, 'w')
+    execFileSync(process.execPath, [join(copyDir, TEST)], {
+      cwd: copyDir, stdio: ['ignore', fd, fd], timeout: 120000, env: { ...process.env }
     })
-    return { ok: true, output: readFileSync(logFile, 'utf8') }
+    ok = true
   } catch {
-    let output = ''
-    try { output = readFileSync(logFile, 'utf8') } catch { /* 空 */ }
-    return { ok: false, output }
+    ok = false
   } finally {
-    closeSync(fd)
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
   }
+  let output = ''
+  try { output = readFileSync(logFile, 'utf8') } catch { /* 空 */ }
+  return { ok, output }
 }
-
-const toolFile = join(PLUGIN, 'lib', 'tool.js')
-const windowFile = join(PLUGIN, 'lib', 'window.js')
 
 const MUTATIONS = [
   {
@@ -59,7 +76,7 @@ const MUTATIONS = [
     // ⚠️ 这一条就是「还原成 0.20.3 的旧代码」——最关键的那次验证。
     label: 'noteReply 判据还原成旧代码（单条发送时恒假）',
     expect: '单条发送后 selfMessageIds 记下了 message_id',
-    file: toolFile,
+    file: 'lib/tool.js',
     from: `          if (target.kind === 'group') {
             const replyIds = Array.isArray(messageIds) ? messageIds : [messageIds]
             const usable = replyIds
@@ -75,7 +92,7 @@ const MUTATIONS = [
     id: 'M2',
     label: 'noteReply 干脆不调用（彻底断开）',
     expect: '单条发送后 selfMessageIds 记下了 message_id',
-    file: toolFile,
+    file: 'lib/tool.js',
     from: '            if (usable.length > 0) noteReply(String(target.id), usable)',
     to: '            if (false) noteReply(String(target.id), usable)'
   },
@@ -83,7 +100,7 @@ const MUTATIONS = [
     id: 'M3',
     label: 'isWindowEligible 去掉「引用她」那一档',
     expect: '群友引用她刚说的那句',
-    file: windowFile,
+    file: 'lib/window.js',
     from: `  if (target === null || !Array.isArray(win.selfMessageIds)) return false
   const wanted = String(target.id ?? '').trim()
   return wanted !== '' && win.selfMessageIds.some((id) => String(id) === wanted)`,
@@ -93,27 +110,28 @@ const MUTATIONS = [
 
 const results = []
 for (const item of MUTATIONS) {
-  const sandbox = join(TMP, `mut-selfreply-${item.id}-${process.pid}`)
-  mkdirSync(sandbox, { recursive: true })
-  const logFile = join(sandbox, 'out.log')
-  let restore
+  // 每个变异用**独立副本**（避免遗留状态污染，坑 30；也避免改到真实源码）
+  const copyDir = makeCopy(`selfreply-${item.id}`)
+  const logFile = join(copyDir, 'out.log')
   try {
-    restore = mutate(item.file, item.from, item.to)
+    // 变异在副本里做（真实源码只读不写 —— 见文件头注释）
+    mutate(copyDir, item.file, item.from, item.to)
   } catch (error) {
-    results.push({ ...item, caught: false, reason: `变异构造失败：${error.message}` })
-    rmSync(sandbox, { recursive: true, force: true })
+    results.push({ ...item, caught: false, reason: `变异构造失败：${error instanceof Error ? error.message : error}` })
+    rmSync(copyDir, { recursive: true, force: true })
     continue
   }
-  const outcome = run(logFile)
-  restore()
-  rmSync(sandbox, { recursive: true, force: true })
+  const outcome = run(copyDir, logFile)
+  rmSync(copyDir, { recursive: true, force: true })
   const caught = outcome.ok === false && outcome.output.includes(item.expect)
   results.push({ ...item, caught, reason: caught ? '已变红' : (outcome.ok ? '仍然全绿（假测试！）' : `红了但不是预期那条（找「${item.expect}」）`) })
 }
 
-const baselineLog = join(TMP, `baseline-selfreply-${process.pid}.log`)
-const baseline = run(baselineLog)
-try { rmSync(baselineLog, { force: true }) } catch { /* 忽略 */ }
+// 基线：不改任何东西时必须绿（同样在副本里跑）
+const baselineCopy = makeCopy('selfreply-baseline')
+const baselineLog = join(baselineCopy, 'baseline.log')
+const baseline = run(baselineCopy, baselineLog)
+rmSync(baselineCopy, { recursive: true, force: true })
 
 console.log('=== 基线 ===')
 console.log(baseline.ok ? '  ✓ 原样运行全绿' : '  ✗ 原样运行就是红的')

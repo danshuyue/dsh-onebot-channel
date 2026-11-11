@@ -404,6 +404,28 @@ console.log('\n渠道开关（0.20.2）：')
   eq(sent.length, 0, '群里默认不自动转发：这段汇报不进群')
   ok(outbound.size === 0, '群里这条也正常出队（不能卡在队头堵住后面的转发）')
 
+  // --- 兴趣点明确启用的单回合答题：只对这个群目标临时放行 ---
+  sent.length = 0
+  outbound.clear()
+  events = []
+  seq = 10
+  enqueueOutbound('session-INTEREST', fakeAgent, 10, { kind: 'group', id: GROUP }, {
+    forceForward: true,
+    replyTo: '-12345'
+  })
+  events = [
+    { seq: 11, type: 'user/message' },
+    { seq: 12, type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '这道题可以先对两边求导。' }] } } },
+    { seq: 13, type: 'turn/end' }
+  ]
+  seq = 13
+  await flushOutbound()
+
+  eq(sent.length, 1, '兴趣点答题在全局群转发关闭时仍发出一条')
+  eq(sent[0]?.action, 'send_group_msg', '兴趣点答题仍走群发送出口')
+  eq(sent[0]?.params?.group_id, Number(GROUP), '答复目标是触发时的原群')
+  ok(sent[0]?.params?.message?.some((part) => part.type === 'reply' && String(part.data?.id) === '-12345'), '答复引用原触发消息')
+
   // --- 群开关打开后又能发（证明不是「群这条路彻底坏了」）---
   sent.length = 0
   outbound.clear()

@@ -14,7 +14,7 @@
  * **每个变异用独立 HOME**：否则前一个变异残留的配置会污染后一个
  * （现象是「单跑绿、整串红」或「每次红的项都不一样」）。
  */
-import { mkdirSync, readFileSync, writeFileSync, rmSync, copyFileSync, cpSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync, rmSync, copyFileSync, cpSync, openSync, closeSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -87,18 +87,31 @@ function runMutation({ name, edits, test, expectRed }) {
   }
 
   const stdoutFile = join(work, 'out.txt')
-  const result = spawnSync(process.execPath, [join(plugin, 'tests', test)], {
-    cwd: plugin,
-    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
-    encoding: 'utf8',
-    timeout: 120000
-  })
-  const output = `${result.stdout ?? ''}${result.stderr ?? ''}`
-  writeFileSync(stdoutFile, output, 'utf8')
+  // ⚠️ **stdio 必须重定向到文件**（2026-11-11 实测，坑 28）：
+  //    本机沙箱里子进程管道会 EPERM（`status=null, stdout=undefined`），
+  //    现象是「baseline 就红 + 一条 ✗ 都没有 + 输出空白」——
+  //    看着像被测代码坏了，其实一个字节都没读到。这个脚本原来用管道，
+  //    所以在本机从来没真跑通过（以前不在 npm test 链里）。
+  let fd
+  let status = null
+  try {
+    fd = openSync(stdoutFile, 'w')
+    const result = spawnSync(process.execPath, [join(plugin, 'tests', test)], {
+      cwd: plugin,
+      env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
+      stdio: ['ignore', fd, fd],
+      timeout: 120000
+    })
+    status = result.status
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
+  }
+  let output = ''
+  try { output = readFileSync(stdoutFile, 'utf8') } catch { output = '' }
 
   // 「红」= 退出码非 0 且输出里有 ✗。只看退出码不够：崩溃也是非 0，
   // 但崩溃说明变异把整个模块弄坏了，那证明不了断言有效。
-  const red = result.status !== 0
+  const red = status !== 0
   const hasCross = output.includes('✗')
   const expectedLine = expectRed === undefined ? null : output
     .split(/\r?\n/)
@@ -108,7 +121,7 @@ function runMutation({ name, edits, test, expectRed }) {
   if (expectedLine !== null) {
     ok(red && hasCross && expectedLine, `${name} → 被抓住（红了，且是「${expectRed}」那条）`)
     if (!(red && hasCross && expectedLine)) {
-      line(`     ↳ status=${result.status} 有✗=${hasCross} 命中预期=${expectedLine}`)
+      line(`     ↳ status=${status} 有✗=${hasCross} 命中预期=${expectedLine}`)
       line(`     ↳ 输出尾部：\n${output.split(/\r?\n/).slice(-12).map((l) => `       ${l}`).join('\n')}`)
     }
   } else {
@@ -426,13 +439,24 @@ for (const test of ['notice-route-sim.mjs', 'wait-anchor-sim.mjs', 'client-rende
     onebotHttp: 'http://127.0.0.1:3000/', token: 'test-token', groupUins: ['975663147'],
     routes: { private: {}, group: {} }
   }, null, 2), 'utf8')
-  const result = spawnSync(process.execPath, [join(PLUGIN, 'tests', test)], {
-    cwd: PLUGIN,
-    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
-    encoding: 'utf8',
-    timeout: 120000
-  })
-  ok(result.status === 0, `baseline ${test} 全绿（未变异时不能红）`)
+  // ⚠️ 同 runIn：baseline 这一段也必须走文件重定向（管道在沙箱里 EPERM，
+  //    否则 `result.status === 0` 恒假 —— baseline 永远「红」，后面所有变异没意义）。
+  const baselineLog = join(work, 'baseline.txt')
+  let baselineFd
+  let baselineStatus = null
+  try {
+    baselineFd = openSync(baselineLog, 'w')
+    const result = spawnSync(process.execPath, [join(PLUGIN, 'tests', test)], {
+      cwd: PLUGIN,
+      env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: work, TEMP: work, TMP: work },
+      stdio: ['ignore', baselineFd, baselineFd],
+      timeout: 120000
+    })
+    baselineStatus = result.status
+  } finally {
+    if (baselineFd !== undefined) { try { closeSync(baselineFd) } catch { /* 已关 */ } }
+  }
+  ok(baselineStatus === 0, `baseline ${test} 全绿（未变异时不能红）`)
   rmSync(work, { recursive: true, force: true })
 }
 

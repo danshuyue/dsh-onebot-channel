@@ -2047,15 +2047,15 @@ USERPROFILE=/tmp/dsh-sandbox node tests/identity-sim.mjs
 
 ### 模块划分
 
-53 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
+56 个模块，按职责分四层（数据流单向：QQ → 消息处理 → 投递 → 会话 → 出站 → QQ）：
 
 | 层 | 模块 |
 |---|---|
 | 入口 | `index.js`（装配各模块） |
 | 基础设施 | `env.js`（数据目录/日志/宿主服务） `config.js`（配置） `state.js`（游标） `window.js`（群聊连续对话窗口、预算与攒批） `onebot.js`（协议调用） `health.js`（探活门控 + 错误分级） `instance.js`（单实例锁） `diaglog.js`（诊断流水：投给模型的正文原文 + 工具调用，内存环形、进程重启即清） |
-| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） `prompttext.js`（正文头模板：渲染 + 「必须含群友」的护栏） |
+| 消息处理 | `poll.js`（轮询 + WS 事件入口） `ws.js`（WS 客户端） `merge.js`（私聊合并窗口） `backfill.js`（上线补历史） `snowluma.js`（WS 自动发现） `images.js`（图片入库） `emoticons.js`（表情段渲染） `emoji-mark.js`（正文表情标记） `forward.js`（合并转发展开：把「群聊的聊天记录」卡片读成真正的聊天记录） `prompttext.js`（正文头模板：渲染 + 「必须含群友」的护栏） `wake.js`（**唤醒词**：纯函数判定 + 每群每小时节流，空词表 = 功能关闭） |
 | 投递与出站 | `deliver.js`（路由 + 投递） `sessions.js`（会话列表 + 冷启动） `archive.js`（识别已归档会话，不往收起来的会话里投） `outbound.js`（回发队列） `notice.js`（回合中断时替插件说一句带 `[系统]` 的话） `split.js`（分条） `title.js`（会话标题） `history.js`（历史检索实现保留，工具当前未注册） |
-| 能力与 UI | `tool.js`（13 个工具实现，按「工具箱」分档注册：默认注册 5 个、其余按档打开；工具实现还保留历史查询、说说与手动记忆代码但当前未注册） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：受限本机目录 → 协议端上传 → record 段） `tts.js`（文字→音频：本机 GPT-SoVITS 与 Breeze Blue 两条路，含全局串行队列） `tts-gate.js`（语音的三道闸：四档 / 对象名单 / 每日额度） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声 + 按四档渲染的语音段） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） |
+| 能力与 UI | `tool.js`（13 个工具实现，按「工具箱」分档注册：默认注册 5 个、其余按档打开；工具实现还保留历史查询、说说与手动记忆代码但当前未注册） `voice.js`（语音转文字，走 `fetch_ptt_text`） `voiceout.js`（发语音：受限本机目录 → 协议端上传 → record 段） `tts.js`（文字→音频：本机 GPT-SoVITS 与 Breeze Blue 两条路，含全局串行队列） `tts-gate.js`（语音的三道闸：四档 / 对象名单 / 每日额度） `api.js`（设置页 API） `client.js`（设置页前端） `sendapi.js`（主动发消息接口） `prompt.js`（常驻系统段落：长任务先出声 + 按四档渲染的语音段） `closure.js`（收尾评分） `rhythm.js`（节奏底座 + 自动静默） `memory.js`（关系卡落盘） `proactive.js`（主动搭话的钟 + 四道闸） `judge.js`（**兴趣点判定器**：直连 `ctx.llm.stream` 做一次分类，失败一律当「不命中」） `interest.js`（**兴趣点**：判定条件→等待取材→分类→按单条执行指令可选群内回应/私聊通知，任务落盘 `qq-bridge-interests.json`） |
 | 跨工作区 | `focus.js`（焦点路由：把消息只送到指定的那个会话） `progress.js`（工作进度投影） `commands.js`（`/进度` `/看` `/帮助` `/去` `/回` 等 QQ 侧命令） |
 | 表情与说说 | `sys-faces.js`（官方目录） `face-resolve.js`（id 解析） `custom-faces.js`（收藏表情） `collect.js`（收藏表情包） `preview.js`（看表情包） `qzone.js`（说说实现保留，发布工具当前未注册） `poke.js`（戳一戳：识别 notice 事件 + 出站拍一拍） |
 | 安全 | `blocked.js`（13 个 action 物理封禁） `allowlist.js`（出站目标白名单） `sensitive.js`（出站内容审计） |

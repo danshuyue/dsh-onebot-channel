@@ -25,9 +25,16 @@
  *
  * ⚠️ 子进程输出用**文件重定向**而不是管道：受限环境下管道会 EPERM，
  *    连 stdout 都读不到，看着像「变异一个都没被抓住」（坑 28）。
+ *
+ * ⚠️ **变异必须在副本里做，不能原地改真实源码**（2026-11-11，0.23.0 接进测试链时现形）：
+ *    DSH 沙箱把工作区源码设成只读 → 原地 `writeFileSync` 直接 EPERM，
+ *    三个变异全部报「变异构造失败」，看起来像功能坏了，其实是**改不动文件**。
+ *    更糟的是：原地改 + 跑完还原这套在崩溃/被 kill 时会**留下被改坏的源码** ——
+ *    那比测试失败严重得多（下一次跑测试就是对着坏源码跑，报错还像别的问题）。
+ *    所以现在先 `cpSync` 一份插件到临时目录，在副本里变异、跑副本里的测试。
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -48,42 +55,55 @@ function pickTmp() {
 }
 const TMP = pickTmp()
 
-/** 变异：把文件的某段字面量替换掉，并断言**真的替换到了**（没命中就是假验证）。 */
-function mutate(file, from, to) {
-  const source = readFileSync(file, 'utf8')
-  if (!source.includes(from)) {
-    throw new Error(`变异没命中：${file} 里找不到\n---\n${from}\n---`)
-  }
-  writeFileSync(file, source.replace(from, to), 'utf8')
-  return () => writeFileSync(file, source, 'utf8')
+/** 复制一份插件（只复制跑测试需要的部分），变异在副本里做。 */
+function makeCopy(tag) {
+  const dir = join(TMP, `copy-${tag}-${process.pid}`)
+  cpSync(PLUGIN, dir, {
+    recursive: true,
+    filter: (src) => !src.includes('node_modules') && !src.includes('.git') && !src.includes('.tmp-test')
+      && !src.includes('.tmp-mutation') && !src.includes('_tmp-')
+  })
+  return dir
 }
 
-function run(script, logFile) {
-  const fd = openSync(logFile, 'w')
+/** 变异：把文件的某段字面量替换掉，并断言**真的替换到了**（没命中就是假验证）。 */
+function mutate(copyDir, rel, from, to) {
+  const file = copyDir === null ? null : join(copyDir, rel)
+  const source = readFileSync(file, 'utf8')
+  if (!source.includes(from)) {
+    throw new Error(`变异没命中：${rel} 里找不到\n---\n${from}\n---`)
+  }
+  writeFileSync(file, source.replace(from, to), 'utf8')
+}
+
+function run(copyDir, script, logFile) {
+  let fd
+  let ok = false
   try {
-    execFileSync(process.execPath, [script], {
-      cwd: PLUGIN,
+    fd = openSync(logFile, 'w')
+    execFileSync(process.execPath, [join(copyDir, script)], {
+      cwd: copyDir,
       stdio: ['ignore', fd, fd],
       timeout: 120000,
       env: { ...process.env }
     })
-    return { ok: true, output: readFileSync(logFile, 'utf8') }
-  } catch (error) {
-    let output = ''
-    try { output = readFileSync(logFile, 'utf8') } catch { /* 读不到就空 */ }
-    return { ok: false, output }
+    ok = true
+  } catch {
+    ok = false
   } finally {
-    closeSync(fd)
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
   }
+  let output = ''
+  try { output = readFileSync(logFile, 'utf8') } catch { /* 读不到就空 */ }
+  return { ok, output }
 }
 
-const windowFile = join(PLUGIN, 'lib', 'window.js')
 const MUTATIONS = [
   {
     id: 'M1',
     label: '删掉「窗口内任何人都进队列」的放宽（退回 isWindowEligible）',
     expect: '第三方普通接话要进队列',
-    file: windowFile,
+    file: 'lib/window.js',
     from: '  if (config?.windowQueueAll === false) return isWindowEligible(win, message, config)',
     to: '  return isWindowEligible(win, message, config); if (config?.windowQueueAll === false) return isWindowEligible(win, message, config)'
   },
@@ -91,7 +111,7 @@ const MUTATIONS = [
     id: 'M2',
     label: '删掉 windowQueueAll 开关判断（永远放宽）',
     expect: 'windowQueueAll=false 时退回旧行为',
-    file: windowFile,
+    file: 'lib/window.js',
     from: '  if (config?.windowQueueAll === false) return isWindowEligible(win, message, config)',
     to: '  if (false) return isWindowEligible(win, message, config)'
   },
@@ -99,7 +119,7 @@ const MUTATIONS = [
     id: 'M3',
     label: '删掉「自己发的消息不入队」',
     expect: '她自己发的消息不进批次队列',
-    file: windowFile,
+    file: 'lib/window.js',
     from: '  if (senderUin !== \'\' && senderUin === String(config?.selfUin ?? \'\').trim()) return false',
     to: ''
   },
@@ -107,7 +127,7 @@ const MUTATIONS = [
     id: 'M4',
     label: '把 isWindowEligible 也改宽（跟着 shouldQueueForWindow 走）',
     expect: 'isWindowEligible 仍然是窄口径',
-    file: windowFile,
+    file: 'lib/window.js',
     from: 'export function isWindowEligible(win, message, config = getConfig()) {\n  if (!activeOf(win) || message === null || typeof message !== \'object\') return false',
     to: 'export function isWindowEligible(win, message, config = getConfig()) {\n  if (!activeOf(win) || message === null || typeof message !== \'object\') return false\n  if (config?.windowQueueAll !== false) return true'
   },
@@ -115,7 +135,7 @@ const MUTATIONS = [
     id: 'M5',
     label: '删掉队列裁剪循环',
     expect: '队列被裁到上限内',
-    file: windowFile,
+    file: 'lib/window.js',
     from: '  while (list.length > cap) {',
     to: '  while (false) {'
   }
@@ -123,22 +143,19 @@ const MUTATIONS = [
 
 const results = []
 for (const item of MUTATIONS) {
-  // 每个变异用独立沙箱，避免遗留状态污染（坑 30）
-  const sandbox = join(TMP, `mut-${item.id}-${process.pid}`)
-  mkdirSync(sandbox, { recursive: true })
-  const logFile = join(sandbox, 'out.log')
-  const restore = (() => {
-    try { return mutate(item.file, item.from, item.to) } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
-    }
-  })()
-  if (typeof restore !== 'function') {
-    results.push({ ...item, caught: false, reason: `变异构造失败：${restore.error}` })
+  // 每个变异用**独立副本**（避免遗留状态污染，坑 30；也避免改到真实源码）
+  const copyDir = makeCopy(item.id)
+  const logFile = join(copyDir, 'out.log')
+  try {
+    // 变异在副本里做（真实源码只读不写 —— 见文件头注释）
+    mutate(copyDir, item.file, item.from, item.to)
+  } catch (error) {
+    results.push({ ...item, caught: false, reason: `变异构造失败：${error instanceof Error ? error.message : error}` })
+    rmSync(copyDir, { recursive: true, force: true })
     continue
   }
-  const outcome = run(join(PLUGIN, TEST), logFile)
-  restore()
-  rmSync(sandbox, { recursive: true, force: true })
+  const outcome = run(copyDir, TEST, logFile)
+  rmSync(copyDir, { recursive: true, force: true })
   const caught = outcome.ok === false && outcome.output.includes(item.expect)
   results.push({
     ...item,
@@ -147,10 +164,11 @@ for (const item of MUTATIONS) {
   })
 }
 
-// 基线：不改任何东西时必须绿
-const baselineLog = join(TMP, `baseline-${process.pid}.log`)
-const baseline = run(join(PLUGIN, TEST), baselineLog)
-try { rmSync(baselineLog, { force: true }) } catch { /* 忽略 */ }
+// 基线：不改任何东西时必须绿（同样在副本里跑，免得对着被改过的源码跑）
+const baselineCopy = makeCopy('baseline')
+const baselineLog = join(baselineCopy, 'baseline.log')
+const baseline = run(baselineCopy, TEST, baselineLog)
+rmSync(baselineCopy, { recursive: true, force: true })
 
 console.log('=== 基线 ===')
 console.log(baseline.ok ? '  ✓ 原样运行全绿' : '  ✗ 原样运行就是红的（先修基线，否则变异无用）')

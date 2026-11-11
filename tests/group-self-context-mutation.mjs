@@ -13,9 +13,15 @@
  *   M5 删掉 identityNote 里「你自己」解释 → 「身份提示里解释了」变红
  *
  * ⚠️ 每个变异用独立沙箱；子进程输出走文件重定向（管道在本机会 EPERM）。
+ *
+ * ⚠️ **变异必须在副本里做，不能原地改真实源码**（2026-11-11，0.23.0 接进测试链时现形）：
+ *    DSH 沙箱把工作区源码设成只读 → 原地 `writeFileSync` 直接 EPERM，
+ *    变异全部报「变异构造失败」，看起来像功能坏了，其实是**改不动文件**。
+ *    更糟的是：原地改 + 跑完还原这套在崩溃/被 kill 时会留下被改坏的源码。
+ *    所以先 `cpSync` 一份插件到临时目录，在副本里变异、跑副本里的测试。
  */
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -32,36 +38,49 @@ function pickTmp() {
 }
 const TMP = pickTmp()
 
-function mutate(file, from, to) {
+/** 复制一份插件（只复制跑测试需要的部分），变异在副本里做。 */
+function makeCopy(tag) {
+  const dir = join(TMP, `copy-${tag}-${process.pid}`)
+  cpSync(PLUGIN, dir, {
+    recursive: true,
+    filter: (src) => !src.includes('node_modules') && !src.includes('.git') && !src.includes('.tmp-test')
+      && !src.includes('.tmp-mutation') && !src.includes('_tmp-')
+  })
+  return dir
+}
+
+function mutate(copyDir, rel, from, to) {
+  const file = join(copyDir, rel)
   const source = readFileSync(file, 'utf8')
-  if (!source.includes(from)) throw new Error(`变异没命中：${file}\n---\n${from}\n---`)
+  if (!source.includes(from)) throw new Error(`变异没命中：${rel}\n---\n${from}\n---`)
   writeFileSync(file, source.replace(from, to), 'utf8')
-  return () => writeFileSync(file, source, 'utf8')
 }
 
-function run(logFile) {
-  const fd = openSync(logFile, 'w')
+function run(copyDir, logFile) {
+  let fd
+  let ok = false
   try {
-    execFileSync(process.execPath, [TEST], {
-      cwd: PLUGIN, stdio: ['ignore', fd, fd], timeout: 120000, env: { ...process.env }
+    fd = openSync(logFile, 'w')
+    execFileSync(process.execPath, [join(copyDir, TEST)], {
+      cwd: copyDir, stdio: ['ignore', fd, fd], timeout: 120000, env: { ...process.env }
     })
-    return { ok: true, output: readFileSync(logFile, 'utf8') }
+    ok = true
   } catch {
-    let output = ''
-    try { output = readFileSync(logFile, 'utf8') } catch { /* 空 */ }
-    return { ok: false, output }
+    ok = false
   } finally {
-    closeSync(fd)
+    if (fd !== undefined) { try { closeSync(fd) } catch { /* 已关 */ } }
   }
+  let output = ''
+  try { output = readFileSync(logFile, 'utf8') } catch { /* 空 */ }
+  return { ok, output }
 }
 
-const pollFile = join(PLUGIN, 'lib', 'poll.js')
 const MUTATIONS = [
   {
     id: 'M1',
     label: 'stampOf 退回只到分钟',
     expect: '正文里有「时:分:秒」',
-    file: pollFile,
+    file: 'lib/poll.js',
     from: '${pad(at.getHours())}:${pad(at.getMinutes())}:${pad(at.getSeconds())}',
     to: '${pad(at.getHours())}:${pad(at.getMinutes())}'
   },
@@ -69,7 +88,7 @@ const MUTATIONS = [
     id: 'M2',
     label: 'gapOf 永远返回空串',
     expect: '15 秒的间隔写成 +15s',
-    file: pollFile,
+    file: 'lib/poll.js',
     from: '  const ms = now - prev',
     to: '  return \'\'; const ms = now - prev'
   },
@@ -77,7 +96,7 @@ const MUTATIONS = [
     id: 'M3',
     label: 'nameOfSender 删掉「你自己」分支',
     expect: '她自己发的话出现在上下文里',
-    file: pollFile,
+    file: 'lib/poll.js',
     from: '    if (String(config.selfUin ?? \'\') !== \'\' && uin === String(config.selfUin)) return \'你自己\'',
     to: ''
   },
@@ -85,7 +104,7 @@ const MUTATIONS = [
     id: 'M4',
     label: 'fetchGroupHistory 恢复「过滤自己」',
     expect: '她自己那句的原话真的带进来了',
-    file: pollFile,
+    file: 'lib/poll.js',
     from: '      return result.data?.messages ?? []\n    } catch (error) {\n      // 连接类错误往上抛',
     to: '      return (result.data?.messages ?? []).filter((m) => String(m?.sender?.user_id) !== String(getConfig().selfUin))\n    } catch (error) {\n      // 连接类错误往上抛'
   },
@@ -93,7 +112,7 @@ const MUTATIONS = [
     id: 'M5',
     label: '删掉身份提示里「你自己」那段解释',
     expect: '身份提示里解释了「你自己」是什么',
-    file: pollFile,
+    file: 'lib/poll.js',
     from: '  if (contextHas(\'你自己\')) {',
     to: '  if (false) {'
   }
@@ -101,27 +120,28 @@ const MUTATIONS = [
 
 const results = []
 for (const item of MUTATIONS) {
-  const sandbox = join(TMP, `mut-self-${item.id}-${process.pid}`)
-  mkdirSync(sandbox, { recursive: true })
-  const logFile = join(sandbox, 'out.log')
-  let restore
+  // 每个变异用**独立副本**（避免遗留状态污染，坑 30；也避免改到真实源码）
+  const copyDir = makeCopy(`self-${item.id}`)
+  const logFile = join(copyDir, 'out.log')
   try {
-    restore = mutate(item.file, item.from, item.to)
+    // 变异在副本里做（真实源码只读不写 —— 见文件头注释）
+    mutate(copyDir, item.file, item.from, item.to)
   } catch (error) {
-    results.push({ ...item, caught: false, reason: `变异构造失败：${error.message}` })
-    rmSync(sandbox, { recursive: true, force: true })
+    results.push({ ...item, caught: false, reason: `变异构造失败：${error instanceof Error ? error.message : error}` })
+    rmSync(copyDir, { recursive: true, force: true })
     continue
   }
-  const outcome = run(logFile)
-  restore()
-  rmSync(sandbox, { recursive: true, force: true })
+  const outcome = run(copyDir, logFile)
+  rmSync(copyDir, { recursive: true, force: true })
   const caught = outcome.ok === false && outcome.output.includes(item.expect)
   results.push({ ...item, caught, reason: caught ? '已变红' : (outcome.ok ? '仍然全绿（假测试！）' : `红了但不是预期那条（找「${item.expect}」）`) })
 }
 
-const baselineLog = join(TMP, `baseline-self-${process.pid}.log`)
-const baseline = run(baselineLog)
-try { rmSync(baselineLog, { force: true }) } catch { /* 忽略 */ }
+// 基线：不改任何东西时必须绿（同样在副本里跑）
+const baselineCopy = makeCopy('self-baseline')
+const baselineLog = join(baselineCopy, 'baseline.log')
+const baseline = run(baselineCopy, baselineLog)
+rmSync(baselineCopy, { recursive: true, force: true })
 
 console.log('=== 基线 ===')
 console.log(baseline.ok ? '  ✓ 原样运行全绿' : '  ✗ 原样运行就是红的')
