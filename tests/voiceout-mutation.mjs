@@ -98,6 +98,12 @@ const MUTATIONS = [
     to: "  const action = 'send_private_msg'"
   },
   {
+    name: 'PCM WAV 开头没有静音',
+    file: 'voiceout.js',
+    from: '    const padded = prependWavSilence(bytes)',
+    to: '    const padded = bytes'
+  },
+  {
     // 只给 voice、不给 text 时，qq_send 应该照样能发（不能因为「空内容」提前抛）
     name: '只发语音时被「空内容」拦住',
     file: 'tool.js',

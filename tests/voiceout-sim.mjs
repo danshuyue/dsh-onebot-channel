@@ -10,7 +10,7 @@
  *
  * 隔离：临时 HOME，fetch 被替换，不碰真 ~/.dsh、不碰真协议端。
  */
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync, lstatSync, existsSync, copyFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, symlinkSync, lstatSync, existsSync, copyFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -60,6 +60,8 @@ function wavBytes() {
   bytes.writeUInt16LE(16, 34)
   bytes.write('data', 36, 'ascii')
   bytes.writeUInt32LE(2, 40)
+  bytes[44] = 0x12
+  bytes[45] = 0x34
   return bytes
 }
 const WAV = join(AUDIO_DIR, 'voice.wav')
@@ -136,6 +138,16 @@ console.log('\n2. 两步上传（合并成一请求拿不到 file_path）：')
   ok(uploads[0]?.params?.chunk_data !== WAV, 'chunk_data 传的是内容不是路径')
   ok(uploads[0]?.params?.total_chunks === 1, '单块上传（total_chunks=1）')
   ok(uploads[0]?.params?.filename === 'voice.wav', '带上了文件名')
+  const uploadedWav = Buffer.from(uploads[0]?.params?.chunk_data ?? '', 'base64')
+  const silenceBytes = Math.ceil(8000 * voiceout.LEADING_SILENCE_MS / 1000) * 2
+  ok(uploadedWav.length === wavBytes().length + silenceBytes,
+    '上传 WAV 在内存中增加了 250ms 静音')
+  ok(readFileSync(WAV).equals(wavBytes()), '处理没有改写本地原始 WAV')
+  ok(uploadedWav.readUInt32LE(4) === uploadedWav.length - 8, '静音处理后 RIFF 长度仍匹配')
+  ok(uploadedWav.readUInt32LE(40) === 2 + silenceBytes, '静音处理后 data 块长度正确')
+  ok(uploadedWav.subarray(44, 44 + silenceBytes).every((byte) => byte === 0), '新增前缀全为静音样本')
+  ok(uploadedWav[44 + silenceBytes] === 0x12 && uploadedWav[45 + silenceBytes] === 0x34,
+    '原音频数据完整保留在静音之后')
 }
 
 console.log('\n2b. AMR / AMR-WB 的标准 LF 头：')
