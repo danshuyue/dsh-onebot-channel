@@ -128,8 +128,22 @@ for (const [hour, minute, expected, label] of [
   ok(isWithinWaterWindows(new Date(2026, 10, 1, hour, minute), water) === expected, `${label} 跨午夜判定`)
 }
 
+console.log('直接 @ 与唤醒词的时段规则：')
+// 空时段保证一直处在时段外，避免回归依赖运行时刻。
+cfg.waterWindows = []
+ok(openWindow('window-test', 'peer-1', 'wake') === false, '时段外唤醒词不能开窗')
+ok(openWindow('window-test', 'peer-1'), '时段外直接 @ 仍可开窗')
+eq(windowOf('window-test')?.openedBy, 'at', '时段外直接 @ 保留开窗来源')
+closeWindow('window-test', 'hours-test')
+cfg.windowEnabled = false
+ok(openWindow('window-test', 'peer-1') === false, '时段外直接 @ 仍尊重窗口总开关')
+cfg.windowEnabled = true
+cfg.waterWindows = ['00:00-12:00', '12:00-00:00']
+ok(openWindow('window-test', 'peer-1', 'wake'), '活跃时段内唤醒词仍可开窗')
+closeWindow('window-test', 'hours-test')
+
 console.log('预算与收尾：')
-Object.assign(cfg, { windowPerPeerDaily: 1, windowPerGroupDaily: 1, windowMaxReplies: 3 })
+Object.assign(cfg, { waterWindows: [], windowPerPeerDaily: 1, windowPerGroupDaily: 1, windowMaxReplies: 3 })
 getState().windows = {}
 saveState({ windows: {} })
 ok(openWindow('window-test', 'peer-1'), '预算内第一窗可开')
@@ -141,6 +155,12 @@ ok(openWindow('window-test', 'peer-1') === false, '同日达到群/个人开窗�
 getState().windows['window-test'].openedToday = 1
 getState().windows['window-test'].peersToday['peer-1'] = 1
 ok(openWindow('window-test', 'peer-1') === false, '超过每日群/个人预算不开窗')
+cfg.windowPerGroupDaily = 20
+ok(openWindow('window-test', 'peer-1') === false, '群预算充足时，时段外直接 @ 仍受个人额度限制')
+ok(openWindow('window-test', 'peer-2'), '个人额度耗尽不影响其他群友开窗')
+closeWindow('window-test', 'budget-test')
+cfg.windowPerGroupDaily = 2
+ok(openWindow('window-test', 'peer-3') === false, '个人预算充足时，时段外直接 @ 仍受群额度限制')
 ok(resetWindowDay('window-test', '2099-01-01'), '跨天可重置窗口计数')
 eq(getState().windows['window-test'].openedToday, 0, '跨天重置 openedToday')
 eq(getState().windows['window-test'].peersToday, {}, '跨天重置 peersToday')

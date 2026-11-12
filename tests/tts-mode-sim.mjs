@@ -29,6 +29,7 @@ const configSrc = read('lib/config.js')
 const indexSrc = read('lib/index.js')
 const clientSrc = read('lib/client.js')
 const toolSrc = read('lib/tool.js')
+const { deriveToolFeatures } = await import('../lib/config.js')
 
 console.log('\n1. 四档的定义（config.js）：')
 {
@@ -72,6 +73,10 @@ console.log('\n3. qq_send 的 voice 参数由四档推导（单向）：')
   ok(!/config\.voiceMode\s*=/.test(block), '不反向写回 voiceMode（单向）')
   ok(/const features = deriveToolFeatures\(config\)/.test(indexSrc),
     'index.js 用的就是推导结果（不是 config.toolFeatures 原样）')
+  ok(deriveToolFeatures({ voiceMode: 'active', toolFeatures: { voiceOut: false } }).voiceOut === true,
+    '旧配置残留 voiceOut=false 不会覆盖主动档语音权限')
+  ok(deriveToolFeatures({ voiceMode: 'off', toolFeatures: { voiceOut: true } }).voiceOut === false,
+    '禁用档会覆盖旧配置残留的 voiceOut=true')
 }
 
 console.log('\n4. 设置页四档是 radio，且四个都在：')
@@ -95,10 +100,14 @@ console.log('\n5. 提示词按档位分叉（prompt.js）：')
   const promptSrc = read('lib/prompt.js')
   ok(promptSrc.includes('默认打字；只有当语音能明显改善表达时才用，例如传达语气、情绪或陪伴感。'),
     '智能选择提示词以文字为默认，只在语音更有表达价值时切换')
-  ok(promptSrc.includes('默认就用语音'), '主动档提示词明确把语音作为默认方式')
+  ok(promptSrc.includes('普通、适合朗读的回复默认优先使用语音'), '主动档仅对获准的 QQ 目标优先使用语音')
   ok(promptSrc.includes('公式、数学符号、代码、路径、列表、链接、需要精确复制的内容'),
     '主动档提示词明确排除公式等不适合朗读的内容')
   ok(promptSrc.includes('对方明确要求打字；或者这句话不适合念出来'), '主动档保留用户要求文字的优先权')
+  ok(promptSrc.includes('export function voiceTurnHint'), '提供逐回合语音提示函数')
+  ok(/targetAllowed\(target, config\)/.test(promptSrc), '逐回合提示复用目标白名单')
+  ok(/voiceTurnHint\(target, config\)/.test(read('lib/deliver.js')), '逐回合提示进入真实 QQ 投递链路')
+  ok(!toolSrc.includes('一两句能说完的事打字更合适'), 'qq_tts 不再跨档建议短回复打字')
   ok(/export const VOICE_SECTION_NAME = 'qq-channel:voice'/.test(promptSrc), '段落名带插件前缀')
   ok(/interpolate: false/.test(promptSrc), '⚠️ interpolate:false（正文含 {{}} 会让提示词组装抛错）')
   ok(/export function mountVoicePromptSection/.test(promptSrc), '导出挂载函数')

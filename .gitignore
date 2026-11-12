@@ -12,6 +12,7 @@ docs/水群潜水-设计稿.md
 # 群号、QQ 号、会话 id、配置快照、日志尾部 —— 绝不能进仓库，
 # 一旦跟着提交走，一次 push 就等于把这些公开了。
 docs/qq-bridge-diag-*.json
+docs/qq-bridge-config*.json
 
 # 本地配置与运行数据（绝不能进仓库）
 qq-bridge.config.json
