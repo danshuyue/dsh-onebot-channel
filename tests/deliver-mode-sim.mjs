@@ -115,6 +115,44 @@ const textOf = (message) => {
   return content.filter((b) => b?.type === 'text').map((b) => String(b.text ?? '')).join('')
 }
 
+console.log('F. 当前 QQ 目标的主动语音指引：')
+{
+  const cfg = getConfig()
+  const oldVoice = { voiceMode: cfg.voiceMode, voiceTargetsGroup: cfg.voiceTargetsGroup, voiceTargetsPrivate: cfg.voiceTargetsPrivate }
+  Object.assign(cfg, { voiceMode: 'active', voiceTargetsGroup: ['group:975663147'], voiceTargetsPrivate: ['private:3472302240'] })
+  clearOutbound()
+  const group = makeAgent({ status: 'idle' })
+  await deliver(ctxFor(group.agent), SESSION, '今晚吃点什么？', target)
+  const body = textOf(group.calls[0]?.message)
+  ok(body.includes('【本回合 QQ 语音】'), '主动档指引进入实际投递正文')
+  ok(body.includes('qq_tts') && body.includes('qq_send') && body.includes('voice: 返回的路径'), '指引说明合成成功后通过 voice 参数发送')
+  ok(body.includes('group_id: "975663147"'), '群聊指引绑定本次群号')
+  ok(body.includes('只在合成失败或不可用时回退文字'), '提示允许合成失败时回退文字')
+  ok(body.includes('语音已成功发送后不再重复发送'), '提示禁止成功后重复发送同一内容')
+  ok(body.includes('今晚吃点什么？'), '指引保留用户原消息')
+
+  Object.assign(cfg, { voiceTargetsGroup: ['group:123456'] })
+  clearOutbound()
+  const denied = makeAgent({ status: 'idle' })
+  await deliver(ctxFor(denied.agent), SESSION, '名单外群消息', target)
+  ok(!textOf(denied.calls[0]?.message).includes('【本回合 QQ 语音】'), '名单外目标不收到主动语音指引')
+
+  for (const mode of ['off', 'passive', 'free', 'unknown']) {
+    clearOutbound()
+    Object.assign(cfg, { voiceMode: mode, voiceTargetsGroup: ['group:975663147'] })
+    const sample = makeAgent({ status: 'idle' })
+    await deliver(ctxFor(sample.agent), SESSION, `档位 ${mode}`, target)
+    ok(!textOf(sample.calls[0]?.message).includes('【本回合 QQ 语音】'), `${mode} 档不注入主动档指引`)
+  }
+
+  Object.assign(cfg, { voiceMode: 'active', voiceTargetsGroup: ['group:975663147'] })
+  clearOutbound()
+  const privateTarget = makeAgent({ status: 'idle' })
+  await deliver(ctxFor(privateTarget.agent), SESSION, '私聊语音', { kind: 'private', id: '3472302240' })
+  ok(textOf(privateTarget.calls[0]?.message).includes('user_id: "3472302240"'), '私聊指引绑定本次好友号')
+  Object.assign(cfg, oldVoice)
+}
+
 // ---- A. 空闲：必须走 followup（与改动前逐字一致） ----
 console.log('A. 空闲时：')
 {

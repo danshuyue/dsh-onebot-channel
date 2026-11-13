@@ -9,7 +9,7 @@
  *   而不是「注册了再拒绝」。这个区别用文本断言很容易写假：
  *   光查 `if (voiceMode !== 'off')` 出现过，改坏了照样绿 —— 所以要查**完整表达式**。
  *
- * 另外守：四档的文案必须逐字是用户给的那四句（那是定义，不是装饰）。
+ * 另外守：四档的文案必须清楚区分「禁用 / 被动 / 智能选择 / 主动」的行为边界。
  */
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -29,6 +29,7 @@ const configSrc = read('lib/config.js')
 const indexSrc = read('lib/index.js')
 const clientSrc = read('lib/client.js')
 const toolSrc = read('lib/tool.js')
+const { deriveToolFeatures } = await import('../lib/config.js')
 
 console.log('\n1. 四档的定义（config.js）：')
 {
@@ -39,12 +40,11 @@ console.log('\n1. 四档的定义（config.js）：')
   ok(/VOICE_MODES\.includes\(raw\) \? raw : 'off'/.test(configSrc),
     '⚠️ 认不出来的值落 off（往安全那边倒，不会静默变成「主动」开始花钱）')
 
-  // 四句文案必须逐字在
   const helps = [
     '这个模式下ai无语音工具调用权限，无法发语音',
-    '这个模式下除非你要求，否则ai不会发语音',
-    '这个模式下ai可以发语音，且直接考虑该不该发语音，实际效果可能和被动模式类似',
-    '这个模式下ai将尽可能全部用语音回复你，除非你要求用文字或者不适合用语音'
+    '默认只打字；只有你明确要求发语音时才会发',
+    'ai会按聊天情境判断；默认打字，只有语音明显更合适时才发',
+    '普通文字回复尽可能发语音；公式、代码、链接等不适合朗读的内容改用文字'
   ]
   for (const text of helps) {
     ok(configSrc.includes(text), `文案逐字存在：${text.slice(0, 18)}…`)
@@ -73,6 +73,10 @@ console.log('\n3. qq_send 的 voice 参数由四档推导（单向）：')
   ok(!/config\.voiceMode\s*=/.test(block), '不反向写回 voiceMode（单向）')
   ok(/const features = deriveToolFeatures\(config\)/.test(indexSrc),
     'index.js 用的就是推导结果（不是 config.toolFeatures 原样）')
+  ok(deriveToolFeatures({ voiceMode: 'active', toolFeatures: { voiceOut: false } }).voiceOut === true,
+    '旧配置残留 voiceOut=false 不会覆盖主动档语音权限')
+  ok(deriveToolFeatures({ voiceMode: 'off', toolFeatures: { voiceOut: true } }).voiceOut === false,
+    '禁用档会覆盖旧配置残留的 voiceOut=true')
 }
 
 console.log('\n4. 设置页四档是 radio，且四个都在：')
@@ -82,14 +86,28 @@ console.log('\n4. 设置页四档是 radio，且四个都在：')
   ok(!/selectField\('voiceMode'/.test(clientSrc),
     '⚠️ 没用 select —— option 里塞不下四句定义，且 title 悬浮在 option 上不生效')
   for (const mode of ['off', 'passive', 'free', 'active']) {
-    ok(new RegExp(`\\['${mode}', '[^']+', '这个模式下`).test(clientSrc), `四档里 ${mode} 带定义文案`)
+    ok(new RegExp(`\\['${mode}', '[^']+',`).test(clientSrc), `四档里包含 ${mode}`)
   }
+  ok(clientSrc.includes("['free', '智能选择', 'ai按聊天情境判断；默认打字，只有语音明显更合适时才发']"),
+    '设置页把 free 命名为智能选择，并说明默认文字')
+  ok(clientSrc.includes('被动 = 你明确要求才发；智能选择 = 默认文字、语音明显更合适时才发；主动 = 适合朗读的普通回复优先语音'),
+    '设置页总览直观区分三档')
   ok(clientSrc.includes('qqb-voice-mode'), '四档接进了 pane')
 }
 
 console.log('\n5. 提示词按档位分叉（prompt.js）：')
 {
   const promptSrc = read('lib/prompt.js')
+  ok(promptSrc.includes('默认打字；只有当语音能明显改善表达时才用，例如传达语气、情绪或陪伴感。'),
+    '智能选择提示词以文字为默认，只在语音更有表达价值时切换')
+  ok(promptSrc.includes('普通、适合朗读的回复默认优先使用语音'), '主动档仅对获准的 QQ 目标优先使用语音')
+  ok(promptSrc.includes('公式、数学符号、代码、路径、列表、链接、需要精确复制的内容'),
+    '主动档提示词明确排除公式等不适合朗读的内容')
+  ok(promptSrc.includes('对方明确要求打字；或者这句话不适合念出来'), '主动档保留用户要求文字的优先权')
+  ok(promptSrc.includes('export function voiceTurnHint'), '提供逐回合语音提示函数')
+  ok(/targetAllowed\(target, config\)/.test(promptSrc), '逐回合提示复用目标白名单')
+  ok(/voiceTurnHint\(target, config\)/.test(read('lib/deliver.js')), '逐回合提示进入真实 QQ 投递链路')
+  ok(!toolSrc.includes('一两句能说完的事打字更合适'), 'qq_tts 不再跨档建议短回复打字')
   ok(/export const VOICE_SECTION_NAME = 'qq-channel:voice'/.test(promptSrc), '段落名带插件前缀')
   ok(/interpolate: false/.test(promptSrc), '⚠️ interpolate:false（正文含 {{}} 会让提示词组装抛错）')
   ok(/export function mountVoicePromptSection/.test(promptSrc), '导出挂载函数')

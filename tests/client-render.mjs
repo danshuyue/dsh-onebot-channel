@@ -300,9 +300,9 @@ ok(paint('advanced').includes('高级设置'), '高级页能打开')
   ok(stanceVoice.includes('语音模式'), '对话节奏页有「语音模式」卡片')
   // 四档的定义必须**整句**渲染出来（用户要求「详细举例介绍」，不是只给个名字）
   ok(stanceVoice.includes('这个模式下ai无语音工具调用权限，无法发语音'), '四档渲染出「禁用」的完整定义')
-  ok(stanceVoice.includes('这个模式下除非你要求，否则ai不会发语音'), '四档渲染出「被动」的完整定义')
-  ok(stanceVoice.includes('实际效果可能和被动模式类似'), '四档渲染出「自由」的完整定义')
-  ok(stanceVoice.includes('除非你要求用文字或者不适合用语音'), '四档渲染出「主动」的完整定义')
+  ok(stanceVoice.includes('默认只打字；只有你明确要求发语音时才会发'), '四档渲染出「被动」的完整定义')
+  ok(stanceVoice.includes('ai按聊天情境判断；默认打字，只有语音明显更合适时才发'), '四档渲染出「智能选择」的完整定义')
+  ok(stanceVoice.includes('普通文字回复尽可能发语音；公式、代码、链接等不适合朗读的内容改用文字'), '四档渲染出「主动」的完整定义')
   ok(stanceVoice.includes('重启 DSH'), '四档卡片写明了要重启')
 
   const adv = paint('advanced')

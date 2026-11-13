@@ -737,6 +737,30 @@ console.log('同一轮轮询的 @ 共享已投递上下文快照：')
   closeWindow(GROUP, 'shared-context-test-done')
 }
 
+console.log('时段外直接 @ 后继续聊：')
+{
+  closeWindow(GROUP, 'outside-hours-reset')
+  getState().windows = {}
+  getState().groups = { [GROUP]: { lastSeq: 900, lastDeliveredSeq: 900 } }
+  const savedHours = cfg.waterWindows
+  cfg.waterWindows = []
+  delivered.length = 0
+  const trigger = {
+    ...msg(PEER, 9001, 901, '时段外找你'),
+    message: [{ type: 'at', data: { qq: SELF } }, { type: 'text', data: { text: '时段外找你' } }]
+  }
+  const first = await handleGroupMessage(ctx, GROUP, trigger, [])
+  ok(first.status === 'delivered', '时段外直接 @ 本身仍投递')
+  ok(windowOf(GROUP) !== null, '时段外直接 @ 打开续聊窗口')
+  const followup = await handleGroupMessage(ctx, GROUP, msg(STRANGER, 9002, 902, '时段外无 @ 的接话'), [])
+  ok(followup.status === 'queued', '时段外其他群友无 @ 的接话进入续聊队列')
+  const continued = await deliverWindowBatch(ctx, GROUP, windowMessages(GROUP))
+  ok(continued.status === 'delivered' && delivered.length === 2, '时段外续聊批次实际投进会话')
+  ok((delivered[1]?.content?.[0]?.text ?? '').includes('时段外无 @ 的接话'), '时段外投递正文带上后续群消息')
+  closeWindow(GROUP, 'outside-hours-done')
+  cfg.waterWindows = savedHours
+}
+
 // 窗口关掉时不该再投（关窗后 pending 清空、批次不再属于任何窗口）
 console.log(`\n结果：${passed} 过 / ${failed} 败`)
 process.exit(failed === 0 ? 0 : 1)
