@@ -11,7 +11,7 @@ import { readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge, rollBetween,
+  shouldNudge, minutesOf, inQuietHours, dayKey, formatGap, formatClock, composeNudge, rollBetween, shouldDailyAt,
   notePeerSpoke, noteNudge, useProactiveFile, clearProactiveState, PROACTIVE_FILE, flushPersist,
   targetAllowed, candidates, orderByStalest
 } from '../lib/proactive.js'
@@ -282,6 +282,29 @@ console.log('\n主动搭话 · 手动触发轮到谁：')
   ok(again.eligibleAt === r.eligibleAt, '同一段安静期里重复判定结果一致')
   const fixed = shouldNudge({ ...base, dailyMax: 6, idleHours: 1.5, idleMaxHours: 0, entry })
   ok(Math.abs(fixed.eligibleAt - (NOW - 1.7 * HOUR + 1.5 * HOUR)) < 1, '上限填 0 → 退回固定用下限')
+}
+
+// ---- 每天固定时刻的主动搭话（shouldDailyAt） ----
+// 与「空闲够久」是两套判断：不看空闲、不占每日上限；但受静默、一天一次、刚聊完不说。
+{
+  const at13 = new Date(2026, 10, 21, 13, 0, 0).getTime()
+  const dailyBase = {
+    now: at13,
+    atMinute: 13 * 60,
+    quietFrom: '01:00',
+    quietTo: '07:00',
+    entry: { lastIncomingAt: at13 - 3 * HOUR },
+  }
+  ok(shouldDailyAt(dailyBase).ok === true, '13:00 正点 → 该发')
+  ok(shouldDailyAt({ ...dailyBase, now: new Date(2026, 10, 21, 12, 59).getTime() }).reason === 'too-early', '12:59 不发')
+  ok(shouldDailyAt({ ...dailyBase, now: new Date(2026, 10, 21, 13, 31).getTime() }).reason === 'too-late', '超过宽限窗口就不补发')
+  ok(shouldDailyAt({ ...dailyBase, now: new Date(2026, 10, 21, 13, 20).getTime() }).ok === true, '宽限窗口内补发')
+  ok(shouldDailyAt({ ...dailyBase, entry: { lastIncomingAt: at13 - 3 * HOUR, countToday: 99 } }).ok === true, '每日上限满了也照发（不占额度）')
+  ok(shouldDailyAt({ ...dailyBase, entry: { lastIncomingAt: at13 - 5 * 60 * 1000 } }).reason === 'just-talked', '刚聊完 5 分钟就不另开口')
+  ok(shouldDailyAt({ ...dailyBase, entry: { lastIncomingAt: at13 - 3 * HOUR, dailyAtDay: '2026-11-21' } }).reason === 'daily-at-done', '同一天只发一次')
+  ok(shouldDailyAt({ ...dailyBase, atMinute: 120, now: new Date(2026, 10, 21, 2, 0).getTime() }).reason === 'quiet-hours', '落在静默时段 → 不发')
+  ok(shouldDailyAt({ ...dailyBase, atMinute: -1 }).reason === 'not-configured', '没配置时间 → 整块关闭')
+  ok(shouldDailyAt({ ...dailyBase, entry: {} }).reason === 'never-talked', '从没聊过的人不发')
 }
 
 console.log(`\n${passed} 过 ${failed} 败`)
